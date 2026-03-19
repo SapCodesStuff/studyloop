@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StudyLoop — Just you and your study buddy</title>
+    <meta name="description"
+        content="A minimalist study accountability app for two people. Study together, stay accountable." />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        display: ['Sora', 'sans-serif'],
+                        body: ['Plus Jakarta Sans', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+
+    <!-- Our Styles -->
+    <link rel="stylesheet" href="styles.css" />
+
+    <!-- Supabase Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body class="h-full flex flex-col font-display">
+
+    <!-- ============================================
+       AUTH VIEW
+       ============================================ -->
+    <div id="auth-view" class="hidden h-full flex flex-col items-center justify-center p-6"
+        style="background: linear-gradient(160deg, var(--cream) 0%, var(--creamy-latte) 100%);">
+        <div class="auth-card animate-fade-in-up">
+            <!-- Logo -->
+            <div class="flex flex-col items-center gap-3 mb-8">
+                <div class="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg"
+                    style="background: var(--espresso);">
+                    <span class="material-symbols-outlined text-4xl" style="color: var(--milk-foam);">coffee</span>
+                </div>
+                <h1 class="text-2xl font-extrabold text-gradient">StudyLoop</h1>
+                <p class="text-sm font-body" style="color: var(--text-muted);">Just you and your study buddy. Nothing
+                    else.</p>
+            </div>
+
+            <!-- Form -->
+            <form id="auth-form" class="flex flex-col gap-4 font-body">
+                <div id="signup-fields" class="flex flex-col gap-4 hidden">
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase tracking-widest mb-1.5"
+                            style="color: var(--text-muted);">Username</label>
+                        <input type="text" id="auth-username" class="auth-input" placeholder="e.g. scholar99" />
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase tracking-widest mb-1.5"
+                            style="color: var(--text-muted);">Display Name</label>
+                        <input type="text" id="auth-display-name" class="auth-input" placeholder="e.g. Alice" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-[10px] font-bold uppercase tracking-widest mb-1.5"
+                        style="color: var(--text-muted);">Email</label>
+                    <input type="email" id="auth-email" required class="auth-input" placeholder="you@example.com" />
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold uppercase tracking-widest mb-1.5"
+                        style="color: var(--text-muted);">Password</label>
+                    <input type="password" id="auth-password" required class="auth-input" placeholder="••••••••" />
+                </div>
+
+                <button type="submit" id="auth-submit-btn" class="pill-btn pill-btn-primary w-full mt-2 py-3.5 text-sm">
+                    Log In
+                </button>
+            </form>
+
+            <div class="text-center mt-5">
+                <button id="toggle-auth-mode" class="text-sm font-body hover:underline"
+                    style="color: var(--text-muted);">
+                    Need an account? <span class="font-bold" style="color: var(--mocha);">Sign up</span>
+                </button>
+            </div>
+            <p id="auth-error" class="text-center text-xs mt-3 hidden" style="color: var(--accent-red);"></p>
+        </div>
+    </div>
+
+    <!-- ============================================
+       MAIN APP SHELL
+       ============================================ -->
+    <div id="app-shell" class="flex flex-col h-full overflow-hidden">
+
+        <!-- ---- HEADER ---- -->
+        <header class="flex items-center justify-between px-6 lg:px-12 py-4 sticky top-0 z-50 flex-shrink-0"
+            style="background: var(--milk-foam); border-bottom: 1.5px solid var(--border-coffee);">
+            <!-- Logo -->
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background: var(--espresso);">
+                    <span class="material-symbols-outlined text-lg" style="color: var(--milk-foam);">coffee</span>
+                </div>
+                <h1 class="text-lg font-extrabold tracking-tight hide-mobile" style="color: var(--text-main);">StudyLoop
+                </h1>
+            </div>
+
+            <!-- Nav Pill -->
+            <div class="nav-pill-group hide-mobile">
+                <button class="nav-pill active" data-view="dashboard-view">Focus</button>
+                <button class="nav-pill" data-view="stats-view">Statistics</button>
+            </div>
+
+            <!-- Right -->
+            <div class="flex items-center gap-3">
+                <button id="settings-btn" class="w-9 h-9 flex items-center justify-center rounded-full"
+                    style="background: var(--creamy-latte); color: var(--mocha); border: 1px solid var(--border-coffee);"
+                    title="Settings">
+                    <span class="material-symbols-outlined text-lg">settings</span>
+                </button>
+                <div id="header-avatar"
+                    class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer"
+                    style="background: var(--mocha); color: var(--milk-foam); border: 2px solid var(--border-coffee);">
+                    <span id="header-initial">U</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- ---- MAIN CONTENT ---- -->
+        <main class="flex-1 overflow-y-auto overflow-x-hidden">
+
+            <!-- ========== DASHBOARD VIEW ========== -->
+            <div id="dashboard-view" class="h-full flex flex-col lg:flex-row">
+
+                <!-- LEFT SIDEBAR: Live Presence -->
+                <aside
+                    class="w-full lg:w-72 flex-shrink-0 p-5 lg:p-6 flex flex-col gap-5 lg:border-r lg:overflow-y-auto"
+                    style="border-color: var(--border-coffee);">
+                    <div class="flex items-center gap-2 px-1">
+                        <span class="material-symbols-outlined text-lg" style="color: var(--mocha);">group</span>
+                        <h2 class="text-[10px] font-bold uppercase tracking-[0.2em]" style="color: var(--text-muted);">
+                            Live Presence</h2>
+                    </div>
+
+                    <!-- My Presence Card -->
+                    <div class="card p-5 flex flex-col items-center gap-3" style="background: var(--creamy-latte);">
+                        <div class="relative">
+                            <div class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold"
+                                style="background: var(--milk-foam); border: 2.5px solid var(--mocha); color: var(--mocha);">
+                                <span id="my-avatar-letter">M</span>
+                            </div>
+                            <div id="my-presence-dot" class="presence-dot studying"></div>
+                        </div>
+                        <div class="text-center">
+                            <p id="my-card-name" class="font-bold text-base" style="color: var(--text-main);">Me</p>
+                            <div id="my-status-pill"
+                                class="mt-1.5 px-3 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest"
+                                style="background: var(--milk-foam); border: 1px solid var(--border-coffee); color: var(--text-muted);">
+                                Idle
+                            </div>
+                            <p id="my-card-timer" class="text-2xl font-extrabold mt-3 tabular-nums"
+                                style="color: var(--espresso);">00:00:00</p>
+                        </div>
+                    </div>
+
+                    <!-- Partner Presence Card -->
+                    <div id="partner-card-wrapper"
+                        class="card p-5 flex flex-col items-center gap-3 opacity-50 transition-opacity"
+                        style="background: var(--milk-foam);">
+                        <div class="relative">
+                            <div class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold"
+                                style="background: var(--creamy-latte); border: 2px solid var(--border-coffee); color: var(--latte);">
+                                <span id="partner-avatar-letter">?</span>
+                            </div>
+                            <div id="partner-presence-dot" class="presence-dot offline"></div>
+                        </div>
+                        <div class="text-center">
+                            <p id="partner-card-name" class="font-bold text-base" style="color: var(--text-muted);">
+                                Partner</p>
+                            <p id="partner-status-text" class="text-[9px] font-bold uppercase tracking-widest mt-1.5"
+                                style="color: var(--text-muted);">Waiting...</p>
+                            <p id="partner-card-timer" class="text-2xl font-extrabold mt-3 tabular-nums"
+                                style="color: var(--border-coffee);">--:--:--</p>
+                        </div>
+                    </div>
+
+                    <!-- Inspirational Quote -->
+                    <div class="mt-auto p-4 rounded-xl text-center hide-mobile"
+                        style="background: rgba(230,213,195,0.3); border: 1.5px solid var(--border-coffee);">
+                        <p class="text-xs italic font-medium leading-relaxed" style="color: var(--text-muted);">"A yawn
+                            is a silent scream for coffee and study."</p>
+                    </div>
+                </aside>
+
+                <!-- CENTER: Timer -->
+                <section class="flex-1 flex flex-col items-center justify-center p-6 lg:p-12 gap-8"
+                    style="background: var(--milk-foam); border: 1.5px solid var(--border-coffee); border-top: none; border-bottom: none; margin: -1px 0;">
+                    <div class="flex flex-col items-center gap-8 w-full max-w-md">
+                        <!-- Timer Ring -->
+                        <div class="relative flex items-center justify-center">
+                            <svg class="w-64 h-64 lg:w-72 lg:h-72" viewBox="0 0 288 288">
+                                <circle class="timer-ring-bg" cx="144" cy="144" r="130" fill="none" stroke-width="12"
+                                    transform="rotate(-90 144 144)" />
+                                <circle id="timer-ring" class="timer-ring-progress" cx="144" cy="144" r="130"
+                                    fill="none" stroke-width="12" stroke-linecap="round" stroke-dasharray="816.81"
+                                    stroke-dashoffset="816.81" transform="rotate(-90 144 144)" />
+                            </svg>
+                            <div class="absolute flex flex-col items-center">
+                                <span id="timer-display"
+                                    class="text-6xl lg:text-7xl font-extrabold tracking-tighter tabular-nums"
+                                    style="color: var(--text-main);">00:00:00</span>
+                                <div id="timer-subject-badge"
+                                    class="mt-3 px-5 py-1.5 rounded-full text-[10px] font-bold tracking-widest uppercase hidden"
+                                    style="background: var(--espresso); color: var(--milk-foam);">
+                                    <span id="timer-subject-text">Subject</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Subject Input + Controls -->
+                        <div class="w-full space-y-4 max-w-sm">
+                            <div id="subject-input-wrapper" class="relative">
+                                <input type="text" id="subject-input" class="pill-input pl-12 pr-6 py-3.5 text-sm"
+                                    placeholder="What are we studying?" />
+                                <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-lg"
+                                    style="color: var(--mocha);">local_library</span>
+                                <!-- Quick select dropdown -->
+                                <div id="subject-dropdown"
+                                    class="hidden absolute left-0 right-0 mt-2 py-2 rounded-xl z-20 max-h-44 overflow-y-auto"
+                                    style="background: var(--milk-foam); border: 1.5px solid var(--border-coffee); box-shadow: var(--shadow-lg);">
+                                </div>
+                            </div>
+
+                            <div id="timer-controls-idle" class="flex gap-3">
+                                <button id="btn-start" class="pill-btn pill-btn-primary flex-1 py-3.5">
+                                    <span class="material-symbols-outlined text-lg">play_arrow</span> Start Focus
+                                </button>
+                            </div>
+
+                            <div id="timer-controls-active" class="hidden flex gap-3">
+                                <button id="btn-pause" class="pill-btn pill-btn-primary flex-1 py-3">
+                                    <span class="material-symbols-outlined text-lg" id="pause-icon">pause</span>
+                                    <span id="pause-text">Pause</span>
+                                </button>
+                                <button id="btn-stop" class="pill-btn pill-btn-outline px-5 py-3">
+                                    <span class="material-symbols-outlined text-lg">stop</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- RIGHT SIDEBAR: Chat -->
+                <aside id="chat-panel"
+                    class="w-full lg:w-80 flex-shrink-0 flex flex-col lg:border-l fixed inset-0 lg:static z-40 translate-x-full lg:translate-x-0 transition-transform duration-300"
+                    style="border-color: var(--border-coffee); background: var(--milk-foam);">
+                    <!-- Chat Header -->
+                    <div class="px-6 py-4 flex items-center justify-between flex-shrink-0"
+                        style="background: rgba(230,213,195,0.15); border-bottom: 1.5px solid var(--border-coffee);">
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined" style="color: var(--mocha);">forum</span>
+                            <h2 class="text-[10px] font-bold uppercase tracking-[0.2em]"
+                                style="color: var(--text-main);">The Café</h2>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-2 h-2 rounded-full animate-pulse" style="background: var(--mocha);"></div>
+                                <span class="text-[9px] font-bold" style="color: var(--text-muted);">LIVE</span>
+                            </div>
+                            <button id="close-chat"
+                                class="lg:hidden w-8 h-8 flex items-center justify-center rounded-full"
+                                style="color: var(--text-muted);">
+                                <span class="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Messages -->
+                    <div id="chat-messages" class="flex-1 overflow-y-auto p-5 flex flex-col gap-4"
+                        style="background: var(--cream);">
+                        <!-- JS populates -->
+                    </div>
+
+                    <!-- Chat Input -->
+                    <div class="p-4 flex-shrink-0"
+                        style="border-top: 1.5px solid var(--border-coffee); background: var(--milk-foam);">
+                        <form id="chat-form" class="relative flex items-center">
+                            <input type="text" id="chat-input" class="pill-input pl-5 pr-14 py-3 text-xs"
+                                placeholder="Send a message..." />
+                            <button type="submit"
+                                class="absolute right-1.5 w-9 h-9 flex items-center justify-center rounded-full transition-colors"
+                                style="background: var(--mocha); color: var(--milk-foam);">
+                                <span class="material-symbols-outlined text-lg">send</span>
+                            </button>
+                        </form>
+                    </div>
+                </aside>
+            </div>
+
+            <!-- ========== STATS VIEW ========== -->
+            <div id="stats-view" class="hidden p-6 lg:p-10 overflow-y-auto">
+                <div class="max-w-5xl mx-auto flex flex-col gap-10 animate-fade-in-up">
+
+                    <!-- Header -->
+                    <div class="text-center">
+                        <h1 class="text-3xl font-extrabold mb-2" style="color: var(--text-main);">Growth &amp; Harmony
+                        </h1>
+                        <p class="text-sm font-body" style="color: var(--text-muted);">Reviewing your shared journey.
+                        </p>
+                        <!-- Toggle -->
+                        <div class="flex justify-center mt-5">
+                            <div class="stats-toggle w-full max-w-xs">
+                                <label><input type="radio" name="stats-toggle" value="me" checked /><span>My
+                                        Stats</span></label>
+                                <label><input type="radio" name="stats-toggle" value="partner" /><span>Partner's
+                                        Stats</span></label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- KPI Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                        <!-- Streak -->
+                        <div class="card-elevated p-6">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="material-symbols-outlined text-lg"
+                                    style="color: var(--latte);">local_fire_department</span>
+                                <span class="text-[10px] font-extrabold uppercase tracking-widest font-body"
+                                    style="color: var(--text-muted);">Study Streak</span>
+                            </div>
+                            <div class="flex items-baseline gap-2">
+                                <span id="stat-streak" class="text-4xl font-extrabold tabular-nums"
+                                    style="color: var(--text-main);">12</span>
+                                <span class="text-sm font-bold uppercase" style="color: var(--latte);">Days</span>
+                            </div>
+                            <div class="mt-3 inline-block text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded"
+                                style="background: rgba(92,138,77,0.1); color: var(--accent-green); border: 1px solid rgba(92,138,77,0.2);">
+                                Longest: <span id="stat-longest">12</span>
+                            </div>
+                        </div>
+
+                        <!-- Total Focus -->
+                        <div class="card-elevated p-6">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="material-symbols-outlined text-lg"
+                                    style="color: var(--mocha);">timer</span>
+                                <span class="text-[10px] font-extrabold uppercase tracking-widest font-body"
+                                    style="color: var(--text-muted);">Total Focus</span>
+                            </div>
+                            <div class="flex items-baseline gap-2">
+                                <span id="stat-hours" class="text-4xl font-extrabold tabular-nums"
+                                    style="color: var(--text-main);">145.5</span>
+                                <span class="text-sm font-bold uppercase" style="color: var(--latte);">Hours</span>
+                            </div>
+                            <div class="mt-3 inline-block text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded"
+                                style="background: rgba(111,78,55,0.08); color: var(--mocha); border: 1px solid rgba(111,78,55,0.15);">
+                                <span id="stat-sessions">87</span> Sessions
+                            </div>
+                        </div>
+
+                        <!-- Daily Goal -->
+                        <div class="card-elevated p-6">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="material-symbols-outlined text-lg"
+                                    style="color: var(--espresso);">task_alt</span>
+                                <span class="text-[10px] font-extrabold uppercase tracking-widest font-body"
+                                    style="color: var(--text-muted);">Today's Goal</span>
+                            </div>
+                            <div class="flex justify-between items-end mb-3">
+                                <div class="flex items-baseline gap-1">
+                                    <span id="stat-goal-pct" class="text-4xl font-extrabold tabular-nums"
+                                        style="color: var(--text-main);">65</span>
+                                    <span class="text-sm font-bold uppercase" style="color: var(--latte);">%</span>
+                                </div>
+                                <span class="text-xs font-bold" style="color: var(--mocha);"><span
+                                        id="stat-goal-done">3.25</span> / <span id="stat-goal-total">5</span> hrs</span>
+                            </div>
+                            <div class="goal-bar-track">
+                                <div id="stat-goal-bar" class="goal-bar-fill" style="width: 65%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Charts Row -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                        <!-- Subject Distribution -->
+                        <div class="card-elevated p-7 flex flex-col gap-6">
+                            <div class="flex items-center justify-between"
+                                style="border-bottom: 1px solid var(--creamy-latte); padding-bottom: 1rem;">
+                                <h3 class="font-bold flex items-center gap-2" style="color: var(--text-main);"><span
+                                        class="material-symbols-outlined text-lg"
+                                        style="color: var(--mocha);">pie_chart</span> Subject Distribution</h3>
+                            </div>
+                            <div class="flex flex-col sm:flex-row items-center justify-around gap-8">
+                                <!-- Dynamic chart content (JS populates) -->
+                                <div id="subject-chart-content"
+                                    class="flex flex-col sm:flex-row items-center justify-around gap-8 w-full"
+                                    style="display: none;">
+                                    <!-- JS fills donut + legend -->
+                                </div>
+                                <!-- Placeholder when no subjects -->
+                                <div id="subject-chart-placeholder"
+                                    class="flex flex-col items-center justify-center py-10 w-full">
+                                    <span class="material-symbols-outlined text-4xl mb-3"
+                                        style="color: var(--border-coffee);">pie_chart</span>
+                                    <p class="text-sm font-semibold" style="color: var(--text-muted);">No subjects
+                                        studied yet</p>
+                                    <p class="text-xs mt-1" style="color: var(--border-coffee);">Start a focus session
+                                        to see your distribution</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Consistency Heatmap -->
+                        <div class="card-elevated p-7 flex flex-col gap-5">
+                            <div class="flex items-center justify-between"
+                                style="border-bottom: 1px solid var(--creamy-latte); padding-bottom: 1rem;">
+                                <h3 class="font-bold flex items-center gap-2" style="color: var(--text-main);"><span
+                                        class="material-symbols-outlined text-lg"
+                                        style="color: var(--mocha);">grid_view</span> Consistency Map</h3>
+                                <span class="text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded"
+                                    style="background: rgba(230,213,195,0.3); color: var(--text-muted);">Last 90
+                                    Days</span>
+                            </div>
+                            <div id="heatmap-grid" class="grid grid-cols-12 gap-[5px]">
+                                <!-- JS fills 60 cells -->
+                            </div>
+                            <div class="flex items-center justify-between mt-1 px-1">
+                                <span class="text-[9px] font-bold uppercase tracking-widest"
+                                    style="color: var(--text-muted);">Dec</span>
+                                <span class="text-[9px] font-bold uppercase tracking-widest"
+                                    style="color: var(--text-muted);">Jan</span>
+                                <span class="text-[9px] font-bold uppercase tracking-widest"
+                                    style="color: var(--text-muted);">Feb</span>
+                            </div>
+                            <div class="flex items-center justify-end gap-2 pt-3"
+                                style="border-top: 1px solid rgba(230,213,195,0.3);">
+                                <span class="text-[9px] font-bold" style="color: var(--text-muted);">Less</span>
+                                <div class="flex gap-1">
+                                    <div class="w-3 h-3 rounded-sm hm-0"></div>
+                                    <div class="w-3 h-3 rounded-sm hm-1"></div>
+                                    <div class="w-3 h-3 rounded-sm hm-2"></div>
+                                    <div class="w-3 h-3 rounded-sm hm-3"></div>
+                                    <div class="w-3 h-3 rounded-sm hm-4"></div>
+                                </div>
+                                <span class="text-[9px] font-bold" style="color: var(--text-muted);">More</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Focus Logs -->
+                    <div class="flex flex-col gap-4 pb-24 lg:pb-8">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-bold flex items-center gap-2" style="color: var(--text-main);"><span
+                                    class="material-symbols-outlined" style="color: var(--mocha);">history</span> Focus
+                                Logs</h3>
+                            <button class="text-xs font-bold hover:underline" style="color: var(--mocha);">View
+                                All</button>
+                        </div>
+                        <div id="focus-logs" class="flex flex-col gap-3">
+                            <!-- JS fills -->
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </main>
+
+        <!-- ---- FOOTER: Daily Goal (Dashboard only) ---- -->
+        <footer id="dashboard-footer" class="flex-shrink-0 px-6 lg:px-12 py-4 hide-mobile"
+            style="background: var(--milk-foam); border-top: 1.5px solid var(--border-coffee);">
+            <div class="max-w-3xl mx-auto">
+                <div class="flex items-center justify-between mb-2 px-1">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-lg" style="color: var(--mocha);">local_cafe</span>
+                        <span class="text-[10px] font-bold uppercase tracking-widest"
+                            style="color: var(--text-main);">Today's Progress</span>
+                    </div>
+                    <span class="text-[10px] font-bold tracking-wider" style="color: var(--text-muted);">
+                        <span id="footer-done">0h 00m</span>
+                        <span style="color: var(--latte); margin: 0 4px;">/</span>
+                        <span id="footer-goal">2h 00m</span>
+                    </span>
+                </div>
+                <div class="goal-bar-track">
+                    <div id="footer-bar" class="goal-bar-fill" style="width: 0%;"></div>
+                </div>
+            </div>
+        </footer>
+
+        <!-- ---- MOBILE BOTTOM NAV ---- -->
+        <nav class="hide-desktop fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-4 py-3"
+            style="background: var(--milk-foam); border-top: 1.5px solid var(--border-coffee);">
+            <button class="mob-nav-btn active flex flex-col items-center gap-0.5" data-view="dashboard-view">
+                <span class="material-symbols-outlined text-xl">home</span>
+                <span class="text-[9px] font-bold">Focus</span>
+            </button>
+            <button class="mob-nav-btn flex flex-col items-center gap-0.5" data-view="stats-view"
+                style="color: var(--text-muted);">
+                <span class="material-symbols-outlined text-xl">analytics</span>
+                <span class="text-[9px] font-bold">Stats</span>
+            </button>
+            <button id="mob-chat-btn" class="w-12 h-12 rounded-full flex items-center justify-center shadow-lg -mt-6"
+                style="background: var(--espresso); color: var(--milk-foam);">
+                <span class="material-symbols-outlined text-xl">forum</span>
+            </button>
+        </nav>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

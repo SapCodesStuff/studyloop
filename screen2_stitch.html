@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html class="" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Coffee &amp; Cream Stats View - StudyLoop</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#6F4E37", // Coffee Mocha
+                        "latte": "#E3D5CA",
+                        "caramel": "#D4A373",
+                        "espresso": "#3C2A21",
+                        "cream": "#F5EBE0",
+                        "background-light": "#FAF9F6",
+                        "background-dark": "#1A120B",
+                    },
+                    fontFamily: {
+                        "display": ["Sora", "sans-serif"],
+                        "body": ["Plus Jakarta Sans", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "0.75rem",
+                        "xl": "1rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style type="text/tailwindcss">
+        :root {
+            --mocha: #6F4E37;
+            --caramel: #D4A373;
+            --latte: #E3D5CA;
+            --cream: #F5EBE0;
+            --espresso: #3C2A21;
+        }
+        body {
+            font-family: "Sora", sans-serif;
+            background-color: #FAF9F6;
+            color: #3C2A21;
+        }
+        .stats-card {
+            background-color: white;
+            border: 1px solid rgba(111, 78, 55, 0.1);
+            box-shadow: 0 4px 20px rgba(60, 42, 33, 0.04);
+        }
+        .heatmap-cell {
+            aspect-ratio: 1/1;
+            border-radius: 4px;
+        }.chart-latte { stroke: #E3D5CA; }
+        .chart-caramel { stroke: #D4A373; }
+        .chart-mocha { stroke: #6F4E37; }
+        .chart-espresso { stroke: #3C2A21; }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-espresso font-display selection:bg-caramel/30">
+<div class="relative flex h-auto min-h-screen w-full flex-col">
+<header class="flex items-center justify-between px-6 md:px-20 py-6 bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-latte">
+<div class="flex items-center gap-3 text-espresso">
+<div class="size-10 bg-primary rounded-xl flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-2xl">coffee</span>
+</div>
+<h2 class="text-xl font-extrabold tracking-tight">StudyLoop</h2>
+</div>
+<div class="flex flex-1 justify-end gap-8 items-center">
+<nav class="hidden lg:flex items-center gap-10">
+<a class="text-espresso/60 hover:text-primary transition-colors text-sm font-semibold" href="#">Dashboard</a>
+<a class="text-primary text-sm font-bold relative after:absolute after:-bottom-2 after:left-0 after:w-full after:h-0.5 after:bg-primary" href="#">Statistics</a>
+<a class="text-espresso/60 hover:text-primary transition-colors text-sm font-semibold" href="#">Focus</a>
+<a class="text-espresso/60 hover:text-primary transition-colors text-sm font-semibold" href="#">Lovers' Lane</a>
+</nav>
+<div class="flex gap-3">
+<button class="flex items-center justify-center rounded-full size-10 border border-latte text-espresso/70 hover:bg-latte/20 transition-all">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+</button>
+<div class="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-cream">
+<span class="material-symbols-outlined">person</span>
+</div>
+</div>
+</div>
+</header>
+<main class="flex flex-1 justify-center py-12 px-4 md:px-8">
+<div class="max-w-[1000px] flex-1 flex flex-col gap-12">
+<div class="flex flex-col items-center gap-6">
+<div class="text-center">
+<h1 class="text-3xl font-bold text-espresso mb-2">Growth &amp; Harmony</h1>
+<p class="text-espresso/50 text-sm">Reviewing your shared journey this season.</p>
+</div>
+<div class="flex h-12 w-full max-w-sm items-center justify-center rounded-xl bg-latte/30 p-1">
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-4 transition-all has-[:checked]:bg-white has-[:checked]:text-primary has-[:checked]:shadow-sm text-espresso/60 font-bold text-xs uppercase tracking-wider">
+<span>Personal Journey</span>
+<input checked="" class="invisible w-0" name="journey-toggle" type="radio" value="me"/>
+</label>
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-4 transition-all has-[:checked]:bg-white has-[:checked]:text-primary has-[:checked]:shadow-sm text-espresso/60 font-bold text-xs uppercase tracking-wider">
+<span>Partner Journey</span>
+<input class="invisible w-0" name="journey-toggle" type="radio" value="partner"/>
+</label>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="stats-card rounded-xl p-6 relative overflow-hidden group">
+<div class="flex flex-col gap-3">
+<div class="flex items-center gap-2 text-caramel">
+<span class="material-symbols-outlined text-xl">local_fire_department</span>
+<p class="text-[10px] font-extrabold uppercase tracking-[0.15em]">Study Streak</p>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="text-3xl font-bold text-espresso">12</p>
+<p class="text-espresso/40 text-sm font-medium">Days</p>
+</div>
+<div class="mt-2 text-[10px] font-semibold bg-green-50 text-green-700 px-2 py-1 rounded w-fit">
+                            Consistent Growth
+                        </div>
+</div>
+</div>
+<div class="stats-card rounded-xl p-6 relative overflow-hidden group">
+<div class="flex flex-col gap-3">
+<div class="flex items-center gap-2 text-primary">
+<span class="material-symbols-outlined text-xl">timer</span>
+<p class="text-[10px] font-extrabold uppercase tracking-[0.15em]">Total Focus</p>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="text-3xl font-bold text-espresso">145.5</p>
+<p class="text-espresso/40 text-sm font-medium">Hours</p>
+</div>
+<div class="mt-2 text-[10px] font-semibold bg-primary/10 text-primary px-2 py-1 rounded w-fit">
+                            Top 5% active
+                        </div>
+</div>
+</div>
+<div class="stats-card rounded-xl p-6 relative overflow-hidden group">
+<div class="flex flex-col gap-3">
+<div class="flex items-center gap-2 text-espresso">
+<span class="material-symbols-outlined text-xl">task_alt</span>
+<p class="text-[10px] font-extrabold uppercase tracking-[0.15em]">Daily Goal</p>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="text-3xl font-bold text-espresso">85</p>
+<p class="text-espresso/40 text-sm font-medium">%</p>
+</div>
+<div class="w-full bg-latte/30 h-1.5 rounded-full mt-2">
+<div class="bg-primary h-full rounded-full w-[85%]"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<div class="stats-card rounded-xl p-8 flex flex-col gap-8">
+<div class="flex justify-between items-center">
+<h3 class="text-espresso text-lg font-bold">Subject Distribution</h3>
+<span class="text-[10px] font-bold text-espresso/40 uppercase tracking-widest">Sep 2023</span>
+</div>
+<div class="flex flex-col sm:flex-row items-center justify-around gap-10">
+<div class="relative size-48 flex items-center justify-center">
+<svg class="size-full rotate-[-90deg]" viewBox="0 0 36 36">
+<circle cx="18" cy="18" fill="none" r="15.915" stroke="rgba(227, 213, 202, 0.3)" stroke-width="3"></circle>
+<circle class="chart-mocha" cx="18" cy="18" fill="none" r="15.915" stroke-dasharray="45 100" stroke-linecap="round" stroke-width="3.5"></circle>
+<circle class="chart-caramel" cx="18" cy="18" fill="none" r="15.915" stroke-dasharray="30 100" stroke-dashoffset="-45" stroke-linecap="round" stroke-width="3.5"></circle>
+<circle class="chart-espresso" cx="18" cy="18" fill="none" r="15.915" stroke-dasharray="15 100" stroke-dashoffset="-75" stroke-linecap="round" stroke-width="3.5"></circle>
+<circle class="chart-latte" cx="18" cy="18" fill="none" r="15.915" stroke-dasharray="10 100" stroke-dashoffset="-90" stroke-linecap="round" stroke-width="3.5"></circle>
+</svg>
+<div class="absolute text-center">
+<p class="text-espresso text-2xl font-bold leading-none">12</p>
+<p class="text-espresso/40 text-[9px] font-bold uppercase tracking-tighter mt-1">Modules</p>
+</div>
+</div>
+<div class="flex flex-col gap-4">
+<div class="flex items-center gap-3">
+<div class="size-3 rounded-full bg-primary"></div>
+<p class="text-xs font-semibold text-espresso/70">Psychology <span class="text-espresso/30 ml-1">45%</span></p>
+</div>
+<div class="flex items-center gap-3">
+<div class="size-3 rounded-full bg-caramel"></div>
+<p class="text-xs font-semibold text-espresso/70">Philosophy <span class="text-espresso/30 ml-1">30%</span></p>
+</div>
+<div class="flex items-center gap-3">
+<div class="size-3 rounded-full bg-espresso"></div>
+<p class="text-xs font-semibold text-espresso/70">Literature <span class="text-espresso/30 ml-1">15%</span></p>
+</div>
+<div class="flex items-center gap-3">
+<div class="size-3 rounded-full bg-latte"></div>
+<p class="text-xs font-semibold text-espresso/70">Others <span class="text-espresso/30 ml-1">10%</span></p>
+</div>
+</div>
+</div>
+</div>
+<div class="stats-card rounded-xl p-8 flex flex-col gap-6">
+<div class="flex justify-between items-center">
+<h3 class="text-espresso text-lg font-bold">Consistency Map</h3>
+<span class="text-[10px] font-bold text-espresso/40 uppercase tracking-widest">Last 90 Days</span>
+</div>
+<div class="flex flex-col gap-6">
+<div class="grid grid-cols-12 gap-2">
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-caramel"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-primary"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-caramel"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-caramel"></div>
+<div class="heatmap-cell bg-primary"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-espresso"></div>
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-primary"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-caramel"></div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+<div class="heatmap-cell bg-latte/20"></div>
+</div>
+</div>
+<div class="flex justify-between items-center px-1">
+<p class="text-[9px] text-espresso/40 font-bold uppercase tracking-widest">July</p>
+<p class="text-[9px] text-espresso/40 font-bold uppercase tracking-widest">August</p>
+<p class="text-[9px] text-espresso/40 font-bold uppercase tracking-widest">September</p>
+</div>
+<div class="flex justify-end items-center gap-2 pt-4 border-t border-latte/20">
+<span class="text-[9px] text-espresso/40 font-bold">LESS</span>
+<div class="flex gap-1">
+<div class="size-2.5 rounded-[2px] bg-latte/20"></div>
+<div class="size-2.5 rounded-[2px] bg-latte"></div>
+<div class="size-2.5 rounded-[2px] bg-caramel"></div>
+<div class="size-2.5 rounded-[2px] bg-primary"></div>
+<div class="size-2.5 rounded-[2px] bg-espresso"></div>
+</div>
+<span class="text-[9px] text-espresso/40 font-bold">MORE</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex flex-col gap-6 mb-24">
+<div class="flex justify-between items-center">
+<h3 class="text-espresso text-xl font-bold">Focus Logs</h3>
+<button class="text-primary text-xs font-bold hover:underline">View History</button>
+</div>
+<div class="grid grid-cols-1 gap-4">
+<div class="flex items-center justify-between p-6 bg-white rounded-xl border border-latte hover:border-caramel/40 transition-all group">
+<div class="flex items-center gap-5">
+<div class="size-12 rounded-lg bg-latte/30 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all">
+<span class="material-symbols-outlined">menu_book</span>
+</div>
+<div>
+<p class="font-bold text-espresso">Cognitive Theories</p>
+<p class="text-[11px] text-espresso/40 font-semibold uppercase tracking-wider">Today • Shared Session</p>
+</div>
+</div>
+<div class="text-right">
+<p class="font-bold text-espresso">2h 45m</p>
+<p class="text-[10px] text-caramel font-bold uppercase">+50 XP</p>
+</div>
+</div>
+<div class="flex items-center justify-between p-6 bg-white rounded-xl border border-latte hover:border-caramel/40 transition-all group">
+<div class="flex items-center gap-5">
+<div class="size-12 rounded-lg bg-latte/30 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all">
+<span class="material-symbols-outlined">history_edu</span>
+</div>
+<div>
+<p class="font-bold text-espresso">Intro to Stoicism</p>
+<p class="text-[11px] text-espresso/40 font-semibold uppercase tracking-wider">Yesterday • Deep Focus</p>
+</div>
+</div>
+<div class="text-right">
+<p class="font-bold text-espresso">1h 20m</p>
+<p class="text-[10px] text-caramel font-bold uppercase">+25 XP</p>
+</div>
+</div>
+<div class="flex items-center justify-between p-6 bg-white rounded-xl border border-latte hover:border-caramel/40 transition-all group">
+<div class="flex items-center gap-5">
+<div class="size-12 rounded-lg bg-latte/30 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all">
+<span class="material-symbols-outlined">palette</span>
+</div>
+<div>
+<p class="font-bold text-espresso">Renaissance Art</p>
+<p class="text-[11px] text-espresso/40 font-semibold uppercase tracking-wider">Sep 18 • Shared Session</p>
+</div>
+</div>
+<div class="text-right">
+<p class="font-bold text-espresso">3h 10m</p>
+<p class="text-[10px] text-caramel font-bold uppercase">+60 XP</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<div class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-latte px-8 py-4 rounded-full shadow-2xl flex items-center gap-12 z-[100]">
+<button class="flex items-center text-espresso/30 hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[24px]">home</span>
+</button>
+<button class="flex items-center text-primary">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1">analytics</span>
+</button>
+<button class="flex items-center justify-center size-14 bg-espresso text-cream rounded-full shadow-lg -mt-12 hover:scale-105 transition-transform ring-4 ring-white">
+<span class="material-symbols-outlined text-[32px]">play_arrow</span>
+</button>
+<button class="flex items-center text-espresso/30 hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[24px]">forum</span>
+</button>
+<button class="flex items-center text-espresso/30 hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+</button>
+</div>
+</div>
+
+</body></html>
