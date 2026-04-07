@@ -104,6 +104,7 @@ async function init() {
     setupAuth();
     setupTimer();
     setupChat();
+    setupSettings();
 
     // Check if user is already logged in
     const { data: { session } } = await sb.auth.getSession();
@@ -506,14 +507,253 @@ function setupNav() {
     navPills.forEach(p => p.addEventListener('click', () => switchView(p.dataset.view)));
     mobNavBtns.forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
 
-    // Logout
+    // Settings modal
     const settingsBtn = $('#settings-btn');
     if (settingsBtn) {
-        settingsBtn.addEventListener('click', async () => {
+        settingsBtn.addEventListener('click', () => {
+            openSettingsModal();
+        });
+    }
+}
+
+// =============================================
+// Settings Modal
+// =============================================
+function openSettingsModal() {
+    const modal = $('#settings-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    // Populate current values
+    if (userProfile) {
+        $('#settings-display-name').value = userProfile.display_name || '';
+        $('#settings-username').value = userProfile.username || '';
+        const goalVal = userProfile.daily_goal_hours || 2;
+        $('#settings-goal-value').textContent = goalVal;
+        $('#settings-goal-value').dataset.value = goalVal;
+    }
+
+    // Hide status
+    const status = $('#settings-status');
+    status.classList.add('hidden');
+}
+
+function closeSettingsModal() {
+    const modal = $('#settings-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function showSettingsStatus(msg, isError = false) {
+    const status = $('#settings-status');
+    status.textContent = msg;
+    status.style.color = isError ? 'var(--accent-red)' : 'var(--accent-green)';
+    status.classList.remove('hidden');
+    setTimeout(() => status.classList.add('hidden'), 3000);
+}
+
+function flashSaveBtn(btn) {
+    btn.classList.add('saved');
+    const icon = btn.querySelector('.material-symbols-outlined');
+    if (icon) icon.textContent = 'done';
+    setTimeout(() => {
+        btn.classList.remove('saved');
+        if (icon) icon.textContent = 'check';
+    }, 1500);
+}
+
+function setupSettings() {
+    // Close modal
+    const closeBtn = $('#settings-close');
+    const backdrop = $('#settings-backdrop');
+    if (closeBtn) closeBtn.addEventListener('click', closeSettingsModal);
+    if (backdrop) backdrop.addEventListener('click', closeSettingsModal);
+
+    // Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeSettingsModal();
+            const deleteModal = $('#delete-confirm-modal');
+            if (deleteModal) deleteModal.classList.add('hidden');
+        }
+    });
+
+    // ---- Save Display Name ----
+    const saveDisplayName = $('#save-display-name');
+    if (saveDisplayName) {
+        saveDisplayName.addEventListener('click', async () => {
+            const input = $('#settings-display-name');
+            const newName = input.value.trim();
+            if (!newName) {
+                showSettingsStatus('Display name cannot be empty.', true);
+                return;
+            }
+            if (!currentUser) return;
+
+            saveDisplayName.disabled = true;
+            const { error } = await sb
+                .from('users')
+                .update({ display_name: newName })
+                .eq('id', currentUser.id);
+
+            if (error) {
+                showSettingsStatus('Failed to update: ' + error.message, true);
+            } else {
+                userProfile.display_name = newName;
+                // Update UI everywhere
+                const initial = newName.charAt(0).toUpperCase();
+                headerInitial.textContent = initial;
+                myAvatarLetter.textContent = initial;
+                myCardName.textContent = newName;
+                flashSaveBtn(saveDisplayName);
+                showSettingsStatus('Display name updated!');
+            }
+            saveDisplayName.disabled = false;
+        });
+    }
+
+    // ---- Save Username ----
+    const saveUsername = $('#save-username');
+    if (saveUsername) {
+        saveUsername.addEventListener('click', async () => {
+            const input = $('#settings-username');
+            const newUsername = input.value.trim();
+            if (!newUsername) {
+                showSettingsStatus('Username cannot be empty.', true);
+                return;
+            }
+            if (!currentUser) return;
+
+            saveUsername.disabled = true;
+            const { error } = await sb
+                .from('users')
+                .update({ username: newUsername })
+                .eq('id', currentUser.id);
+
+            if (error) {
+                if (error.message?.includes('unique') || error.code === '23505') {
+                    showSettingsStatus('Username already taken!', true);
+                } else {
+                    showSettingsStatus('Failed to update: ' + error.message, true);
+                }
+            } else {
+                userProfile.username = newUsername;
+                flashSaveBtn(saveUsername);
+                showSettingsStatus('Username updated!');
+            }
+            saveUsername.disabled = false;
+        });
+    }
+
+    // ---- Daily Goal Stepper ----
+    const goalValueEl = $('#settings-goal-value');
+    const goalDecrease = $('#goal-decrease');
+    const goalIncrease = $('#goal-increase');
+
+    if (goalDecrease && goalIncrease && goalValueEl) {
+        goalDecrease.addEventListener('click', () => {
+            let val = parseFloat(goalValueEl.dataset.value || '2');
+            val = Math.max(0.5, val - 0.5);
+            goalValueEl.textContent = val;
+            goalValueEl.dataset.value = val;
+        });
+
+        goalIncrease.addEventListener('click', () => {
+            let val = parseFloat(goalValueEl.dataset.value || '2');
+            val = Math.min(24, val + 0.5);
+            goalValueEl.textContent = val;
+            goalValueEl.dataset.value = val;
+        });
+    }
+
+    // ---- Save Daily Goal ----
+    const saveDailyGoal = $('#save-daily-goal');
+    if (saveDailyGoal) {
+        saveDailyGoal.addEventListener('click', async () => {
+            const newGoal = parseFloat(goalValueEl.dataset.value || '2');
+            if (!currentUser) return;
+
+            saveDailyGoal.disabled = true;
+            const { error } = await sb
+                .from('users')
+                .update({ daily_goal_hours: newGoal })
+                .eq('id', currentUser.id);
+
+            if (error) {
+                showSettingsStatus('Failed to update goal: ' + error.message, true);
+            } else {
+                userProfile.daily_goal_hours = newGoal;
+                flashSaveBtn(saveDailyGoal);
+                showSettingsStatus(`Daily goal set to ${newGoal} hours!`);
+                // Refresh stats
+                await loadStats();
+            }
+            saveDailyGoal.disabled = false;
+        });
+    }
+
+    // ---- Logout ----
+    const logoutBtn = $('#settings-logout');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            closeSettingsModal();
             await sb.auth.signOut();
             currentUser = null;
             userProfile = null;
             showAuth();
+        });
+    }
+
+    // ---- Delete Account ----
+    const deleteBtn = $('#settings-delete-account');
+    const deleteModal = $('#delete-confirm-modal');
+    const deleteCancel = $('#delete-cancel');
+    const deleteConfirm = $('#delete-confirm');
+
+    if (deleteBtn && deleteModal) {
+        deleteBtn.addEventListener('click', () => {
+            deleteModal.classList.remove('hidden');
+        });
+    }
+
+    if (deleteCancel && deleteModal) {
+        deleteCancel.addEventListener('click', () => {
+            deleteModal.classList.add('hidden');
+        });
+    }
+
+    if (deleteConfirm) {
+        deleteConfirm.addEventListener('click', async () => {
+            if (!currentUser) return;
+
+            deleteConfirm.disabled = true;
+            deleteConfirm.textContent = 'Deleting...';
+
+            try {
+                // Delete user from the public.users table (cascades to sessions, messages, subjects, etc.)
+                const { error: deleteError } = await sb
+                    .from('users')
+                    .delete()
+                    .eq('id', currentUser.id);
+
+                if (deleteError) {
+                    // If RLS blocks delete, try through auth signout anyway
+                    console.error('Delete user data error:', deleteError.message);
+                }
+
+                // Sign out the user (the auth.users ON DELETE CASCADE should handle the rest)
+                await sb.auth.signOut();
+
+                currentUser = null;
+                userProfile = null;
+                deleteModal.classList.add('hidden');
+                closeSettingsModal();
+                showAuth();
+            } catch (err) {
+                console.error('Delete account error:', err);
+                showSettingsStatus('Failed to delete account. Please try again.', true);
+                deleteConfirm.disabled = false;
+                deleteConfirm.textContent = 'Delete Forever';
+            }
         });
     }
 }

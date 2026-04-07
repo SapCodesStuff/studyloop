@@ -520,6 +520,130 @@
 
     </div>
 
+    <!-- ============================================
+       SETTINGS MODAL
+       ============================================ -->
+    <div id="settings-modal" class="hidden fixed inset-0 z-[200] flex items-center justify-center">
+        <!-- Backdrop -->
+        <div id="settings-backdrop" class="absolute inset-0" style="background: rgba(61,43,31,0.45); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);"></div>
+
+        <!-- Modal Card -->
+        <div class="settings-card relative animate-fade-in-up">
+            <!-- Close -->
+            <button id="settings-close" class="absolute top-5 right-5 w-9 h-9 flex items-center justify-center rounded-full transition-colors" style="color: var(--text-muted); background: var(--cream);" title="Close">
+                <span class="material-symbols-outlined text-lg">close</span>
+            </button>
+
+            <!-- Header -->
+            <div class="flex items-center gap-3 mb-8">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: var(--espresso);">
+                    <span class="material-symbols-outlined text-xl" style="color: var(--milk-foam);">settings</span>
+                </div>
+                <div>
+                    <h2 class="text-xl font-extrabold" style="color: var(--text-main);">Settings</h2>
+                    <p class="text-[10px] font-bold uppercase tracking-widest mt-0.5" style="color: var(--text-muted);">Manage your account</p>
+                </div>
+            </div>
+
+            <!-- Settings Sections -->
+            <div class="flex flex-col gap-6">
+
+                <!-- Profile Section -->
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <span class="material-symbols-outlined text-base" style="color: var(--mocha);">person</span>
+                        <span class="text-[10px] font-extrabold uppercase tracking-[0.15em]" style="color: var(--text-main);">Profile</span>
+                    </div>
+                    <div class="flex flex-col gap-4 mt-4">
+                        <div>
+                            <label class="settings-label">Display Name</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="settings-display-name" class="settings-input flex-1" placeholder="Your display name" />
+                                <button id="save-display-name" class="settings-save-btn" title="Save">
+                                    <span class="material-symbols-outlined text-sm">check</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="settings-label">Username</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="settings-username" class="settings-input flex-1" placeholder="Your username" />
+                                <button id="save-username" class="settings-save-btn" title="Save">
+                                    <span class="material-symbols-outlined text-sm">check</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Daily Goal Section -->
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <span class="material-symbols-outlined text-base" style="color: var(--mocha);">target</span>
+                        <span class="text-[10px] font-extrabold uppercase tracking-[0.15em]" style="color: var(--text-main);">Daily Goal</span>
+                    </div>
+                    <div class="mt-4">
+                        <label class="settings-label">Study hours per day</label>
+                        <div class="flex items-center gap-3">
+                            <button id="goal-decrease" class="settings-stepper-btn">
+                                <span class="material-symbols-outlined text-sm">remove</span>
+                            </button>
+                            <div class="flex items-baseline gap-1">
+                                <span id="settings-goal-value" class="text-3xl font-extrabold tabular-nums" style="color: var(--text-main);">2</span>
+                                <span class="text-xs font-bold uppercase" style="color: var(--latte);">hrs</span>
+                            </div>
+                            <button id="goal-increase" class="settings-stepper-btn">
+                                <span class="material-symbols-outlined text-sm">add</span>
+                            </button>
+                            <button id="save-daily-goal" class="settings-save-btn ml-auto" title="Save Goal">
+                                <span class="material-symbols-outlined text-sm">check</span>
+                                <span class="text-[10px] font-bold uppercase tracking-wider">Save</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Divider -->
+                <div style="height: 1px; background: var(--border-coffee);"></div>
+
+                <!-- Actions -->
+                <div class="flex flex-col gap-3">
+                    <button id="settings-logout" class="settings-action-btn">
+                        <span class="material-symbols-outlined text-lg">logout</span>
+                        <span>Log Out</span>
+                    </button>
+                    <button id="settings-delete-account" class="settings-action-btn settings-danger-btn">
+                        <span class="material-symbols-outlined text-lg">delete_forever</span>
+                        <span>Delete Account</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Status message -->
+            <p id="settings-status" class="text-center text-xs font-bold mt-5 hidden" style="color: var(--accent-green);"></p>
+        </div>
+    </div>
+
+    <!-- ============================================
+       DELETE CONFIRMATION MODAL
+       ============================================ -->
+    <div id="delete-confirm-modal" class="hidden fixed inset-0 z-[300] flex items-center justify-center">
+        <div class="absolute inset-0" style="background: rgba(61,43,31,0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);"></div>
+        <div class="relative animate-fade-in-up" style="background: var(--milk-foam); border: 1.5px solid var(--accent-red); border-radius: var(--radius-2xl); box-shadow: var(--shadow-xl); padding: 2rem; max-width: 400px; width: calc(100% - 2rem);">
+            <div class="flex flex-col items-center gap-4 text-center">
+                <div class="w-14 h-14 rounded-full flex items-center justify-center" style="background: rgba(192,57,43,0.1);">
+                    <span class="material-symbols-outlined text-3xl" style="color: var(--accent-red);">warning</span>
+                </div>
+                <h3 class="text-lg font-extrabold" style="color: var(--text-main);">Delete Account?</h3>
+                <p class="text-sm font-body" style="color: var(--text-muted); line-height: 1.7;">This will <strong>permanently delete</strong> your account and all associated data — sessions, messages, subjects, and stats. This action cannot be undone.</p>
+                <div class="flex gap-3 w-full mt-2">
+                    <button id="delete-cancel" class="pill-btn pill-btn-outline flex-1 py-3 text-xs">Cancel</button>
+                    <button id="delete-confirm" class="pill-btn flex-1 py-3 text-xs" style="background: var(--accent-red); color: white;">Delete Forever</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 
