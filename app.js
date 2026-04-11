@@ -28,11 +28,16 @@ const authError = $('#auth-error');
 const dashboardView = $('#dashboard-view');
 const statsView = $('#stats-view');
 const calendarView = $('#calendar-view');
+const marketplaceView = $('#marketplace-view');
 const dashboardFooter = $('#dashboard-footer');
 
 // Nav
 const navPills = $$('.nav-pill');
 const mobNavBtns = $$('.mob-nav-btn');
+const desktopNavGroup = $('#desktop-nav-group');
+const mobNavGroup = $('#mob-nav-group');
+const navPillSlider = $('#nav-pill-slider');
+const mobNavSlider = $('#mob-nav-slider');
 
 // Timer
 const timerDisplay = $('#timer-display');
@@ -84,6 +89,11 @@ const heatmapGrid = $('#heatmap-grid');
 // Focus Logs
 const focusLogs = $('#focus-logs');
 
+function htmlLoadingRing(size) {
+    const cls = size ? ` loading-ring--${size}` : '';
+    return `<div class="loading-ring${cls}" role="presentation"></div>`;
+}
+
 // =============================================
 // State
 // =============================================
@@ -111,6 +121,10 @@ let calendarRealtimeChannel = null;
 let lastTodoDateKey = null;
 let todoDateCheckIntervalId = null;
 let focusLogsExpanded = false;
+let statsLoadGeneration = 0;
+let todoSyncGen = 0;
+/** Completed focus seconds today (local day), from DB — excludes in-progress session. */
+let myTodayCompletedFromDb = 0;
 
 const PARTNER_LIVE_MS = 90 * 1000;
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * 130; // ~816.81
@@ -129,6 +143,7 @@ function applyTheme(dark) {
     localStorage.setItem('studyloop_theme', dark ? 'dark' : 'light');
     const cb = document.getElementById('settings-dark-mode');
     if (cb) cb.checked = dark;
+    requestAnimationFrame(() => requestAnimationFrame(syncNavSliders));
 }
 
 async function init() {
@@ -270,6 +285,7 @@ function showAuth() {
 async function showApp() {
     authView.classList.add('hidden');
     appShell.classList.remove('hidden');
+    requestAnimationFrame(() => requestAnimationFrame(syncNavSliders));
 }
 
 async function onLoginSuccess() {
@@ -326,29 +342,60 @@ async function fetchUserProfile() {
 // Load Real Data
 // =============================================
 async function loadSubjects() {
-    if (!currentUser) return;
+    if (!currentUser || !subjectDropdown) return;
     const { data, error } = await sb
         .from('subjects')
-        .select('name')
+        .select('id,name')
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: false });
 
     subjectDropdown.innerHTML = '';
     if (!error && data && data.length > 0) {
-        data.forEach(s => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'w-full text-left px-5 py-2.5 text-xs font-semibold transition-colors';
-            btn.style.cssText = 'color: var(--text-main);';
-            btn.textContent = s.name;
-            btn.addEventListener('mouseenter', () => btn.style.background = 'var(--creamy-latte)');
-            btn.addEventListener('mouseleave', () => btn.style.background = '');
-            btn.addEventListener('mousedown', (e) => {
+        data.forEach((s) => {
+            const row = document.createElement('div');
+            row.className = 'subject-dropdown-row';
+            row.dataset.subjectName = s.name;
+
+            const pick = document.createElement('button');
+            pick.type = 'button';
+            pick.className = 'subject-dropdown-pick';
+            pick.textContent = s.name;
+            pick.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 subjectInput.value = s.name;
                 subjectDropdown.classList.add('hidden');
             });
-            subjectDropdown.appendChild(btn);
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'subject-dropdown-remove';
+            remove.setAttribute('aria-label', `Remove ${s.name}`);
+            remove.innerHTML = '<span class="material-symbols-outlined text-base leading-none">close</span>';
+            remove.addEventListener('mousedown', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const { error: delErr } = await sb
+                    .from('subjects')
+                    .delete()
+                    .eq('id', s.id)
+                    .eq('user_id', currentUser.id);
+                if (delErr) {
+                    console.warn('Remove subject:', delErr.message);
+                    return;
+                }
+                if (subjectInput && subjectInput.value.trim() === s.name) {
+                    subjectInput.value = '';
+                }
+                await loadSubjects();
+                if (subjectDropdown.children.length && document.activeElement === subjectInput) {
+                    subjectDropdown.classList.remove('hidden');
+                    filterSubjects(subjectInput.value);
+                }
+            });
+
+            row.appendChild(pick);
+            row.appendChild(remove);
+            subjectDropdown.appendChild(row);
         });
     }
 }
@@ -398,7 +445,7 @@ async function loadChatHistory() {
             addChatMessage(msg.content, isOutgoing, time);
         });
     } else {
-        chatMessages.innerHTML = '<p class="text-center text-xs py-8" style="color: var(--text-muted);">No messages yet. Say hello to your study buddy!</p>';
+        chatMessages.innerHTML = '<p class="chat-empty-hint">No messages yet — say hello to your study buddy.</p>';
     }
 
     // Subscribe to new messages in real time
@@ -418,100 +465,49 @@ async function loadChatHistory() {
 
 async function loadStats() {
     if (!currentUser) return;
-
-    // Fetch user profile for streaks and goal
-    if (userProfile) {
-        const streak = document.getElementById('stat-streak');
-        const longest = document.getElementById('stat-longest');
-        if (streak) streak.textContent = userProfile.current_streak || 0;
-        if (longest) longest.textContent = userProfile.longest_streak || 0;
-
-        const goalTarget = document.getElementById('stat-goal-total');
-        if (goalTarget) goalTarget.textContent = userProfile.daily_goal_hours || 2;
-
-        const ptsEl = document.getElementById('stat-points');
-        if (ptsEl) ptsEl.textContent = userProfile.total_task_points ?? 0;
-    }
-
-    // Fetch total hours and session count
-    const { data: sessions } = await sb
-        .from('sessions')
-        .select('duration_seconds')
-        .eq('user_id', currentUser.id)
-        .eq('is_active', false);
-
-    if (sessions) {
-        const totalSec = sessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
-        const totalHrs = (totalSec / 3600).toFixed(1);
-        const el = document.getElementById('stat-hours');
-        if (el) el.textContent = totalHrs;
-        const sessEl = document.getElementById('stat-sessions');
-        if (sessEl) sessEl.textContent = sessions.length;
-    }
-
-    // Today's goal progress (stats KPI + footer use current daily goal from profile)
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const { data: todaySessions } = await sb
-        .from('sessions')
-        .select('duration_seconds')
-        .eq('user_id', currentUser.id)
-        .eq('is_active', false)
-        .gte('started_at', todayStart.toISOString());
-
-    const todaySec = (todaySessions || []).reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
-    if (userProfile) {
-        updateStatGoalKpi(todaySec, userProfile.daily_goal_hours);
-    }
-    updateFooterProgress(todaySec);
-
-    // Populate heatmap from daily_stats
-    heatmapGrid.innerHTML = '';
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    const { data: dailyData } = await sb
-        .from('daily_stats')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .gte('session_date', ninetyDaysAgo.toISOString().split('T')[0]);
-
-    const dailyMap = {};
-    if (dailyData) {
-        dailyData.forEach(d => { dailyMap[d.session_date] = d.total_seconds || 0; });
-    }
-
-    // Create 60 cells for last ~90 days
-    for (let i = 59; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - (i * 1.5)); // Approximate spread
-        const key = d.toISOString().split('T')[0];
-        const sec = dailyMap[key] || 0;
-        let lvl = 0;
-        if (sec > 0) lvl = 1;
-        if (sec > 1800) lvl = 2;
-        if (sec > 3600) lvl = 3;
-        if (sec > 7200) lvl = 4;
-        const cell = document.createElement('div');
-        cell.className = `heatmap-cell hm-${lvl}`;
-        cell.title = `${key}: ${formatDuration(sec)}`;
-        heatmapGrid.appendChild(cell);
-    }
-
-    // Render subject distribution chart
-    await renderSubjectChart(currentUser.id);
-
-    await fetchAndRenderFocusLogs(currentUser.id);
+    await loadStatsFor(currentUser.id, userProfile);
 }
 
 // =============================================
 // Navigation
 // =============================================
+function updateNavSliderTrack(groupEl, sliderEl, activeBtn) {
+    if (!groupEl || !sliderEl || !activeBtn) return;
+    const g = groupEl.getBoundingClientRect();
+    const b = activeBtn.getBoundingClientRect();
+    sliderEl.style.left = `${b.left - g.left}px`;
+    sliderEl.style.top = `${b.top - g.top}px`;
+    sliderEl.style.width = `${b.width}px`;
+    sliderEl.style.height = `${b.height}px`;
+}
+
+function syncNavSliders() {
+    const headerNav = document.querySelector('.app-header__nav');
+    const desk = document.querySelector('.nav-pill.active');
+    if (
+        desktopNavGroup &&
+        navPillSlider &&
+        desk &&
+        headerNav &&
+        headerNav.offsetParent !== null
+    ) {
+        updateNavSliderTrack(desktopNavGroup, navPillSlider, desk);
+    }
+    const mob = document.querySelector('.mob-nav-btn.active');
+    if (mobNavGroup && mobNavSlider && mob && mobNavGroup.offsetParent !== null) {
+        updateNavSliderTrack(mobNavGroup, mobNavSlider, mob);
+    }
+}
+
 function setupNav() {
     const views = {
         'dashboard-view': dashboardView,
         'stats-view': statsView,
         'calendar-view': calendarView,
+        'marketplace-view': marketplaceView,
     };
+
+    let resizeNavTimer;
 
     function switchView(viewId) {
         Object.entries(views).forEach(([id, el]) => {
@@ -525,7 +521,6 @@ function setupNav() {
         mobNavBtns.forEach(b => {
             const isActive = b.dataset.view === viewId;
             b.classList.toggle('active', isActive);
-            b.style.color = isActive ? 'var(--text-main)' : 'var(--text-muted)';
         });
 
         // Auto-refresh stats data when switching to stats view
@@ -549,10 +544,19 @@ function setupNav() {
         if (viewId === 'dashboard-view' && currentUser && userProfile) {
             refreshFooterTodayProgress();
         }
+
+        requestAnimationFrame(() => requestAnimationFrame(syncNavSliders));
     }
 
     navPills.forEach(p => p.addEventListener('click', () => switchView(p.dataset.view)));
     mobNavBtns.forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeNavTimer);
+        resizeNavTimer = setTimeout(syncNavSliders, 80);
+    });
+
+    requestAnimationFrame(() => requestAnimationFrame(syncNavSliders));
 
     // Settings modal
     const settingsBtn = $('#settings-btn');
@@ -842,6 +846,9 @@ function clearDashboardIntervalsAndPresence() {
     partnerSessionStartMs = null;
     partnerLastActivityAtMs = 0;
     focusLogsExpanded = false;
+    myTodayCompletedFromDb = 0;
+    const myTodayEl = document.getElementById('my-card-today');
+    if (myTodayEl) myTodayEl.textContent = 'Today: —';
 }
 
 function sendAppPresencePing() {
@@ -878,6 +885,7 @@ function refreshStudyTimerUI() {
     const maxSeconds = 7200;
     const progress = Math.min(timerSeconds / maxSeconds, 1);
     timerRing.style.strokeDashoffset = TIMER_RING_CIRCUMFERENCE * (1 - progress);
+    renderMyCardTodayLine();
 }
 
 // =============================================
@@ -920,7 +928,8 @@ function filterSubjects(query) {
     const q = query.toLowerCase();
     let anyVisible = false;
     for (const item of items) {
-        const match = item.textContent.toLowerCase().includes(q);
+        const name = (item.dataset.subjectName || '').toLowerCase();
+        const match = name.includes(q);
         item.style.display = match ? '' : 'none';
         if (match) anyVisible = true;
     }
@@ -1078,6 +1087,8 @@ function formatDuration(seconds) {
 }
 
 function updateFooterProgress(todaySec) {
+    myTodayCompletedFromDb = todaySec;
+    renderMyCardTodayLine();
     if (!userProfile) return;
     const goalHrs = Number(userProfile.daily_goal_hours) || 2;
     const goalSec = Math.max(0, Math.round(goalHrs * 3600));
@@ -1168,7 +1179,7 @@ async function fetchAndRenderFocusLogs(userId) {
         const when = formatSessionDate(session.started_at);
         item.innerHTML = `
                 <div class="flex items-center gap-4">
-                    <div class="w-11 h-11 rounded-lg flex items-center justify-center" style="background: rgba(230,213,195,0.4); color: var(--mocha);">
+                    <div class="w-11 h-11 rounded-lg flex items-center justify-center" style="background: var(--surface-recess); color: var(--mocha);">
                         <span class="material-symbols-outlined">menu_book</span>
                     </div>
                     <div>
@@ -1256,15 +1267,14 @@ function setupChat() {
 
 function addChatMessage(text, isOutgoing, time) {
     const wrapper = document.createElement('div');
-    wrapper.className = `flex flex-col ${isOutgoing ? 'items-end' : 'items-start'} animate-fade-in`;
+    wrapper.className = `chat-msg ${isOutgoing ? 'chat-msg--out' : 'chat-msg--in'} flex flex-col animate-fade-in`;
 
     const bubble = document.createElement('div');
     bubble.className = `chat-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`;
     bubble.textContent = text;
 
     const ts = document.createElement('span');
-    ts.className = 'text-[9px] font-bold uppercase mt-1 px-1';
-    ts.style.color = 'var(--text-muted)';
+    ts.className = 'chat-msg__time';
     ts.textContent = time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     wrapper.appendChild(bubble);
@@ -1348,6 +1358,10 @@ function tickPartnerUI() {
 async function loadPartner() {
     if (!currentUser) return;
 
+    const partnerLoading = document.getElementById('partner-card-loading');
+    if (partnerLoading) partnerLoading.classList.remove('hidden');
+
+    try {
     // Find the other user (partner)
     const { data: allUsers, error } = await sb
         .from('users')
@@ -1360,11 +1374,16 @@ async function loadPartner() {
         partnerLastActivityAtMs = 0;
         partnerSessionStartMs = null;
         partnerCardName.textContent = 'No partner yet';
+        partnerCardName.classList.add('presence-card__name--muted');
         partnerStatusText.textContent = 'Invite someone!';
         if (partnerCardToday) partnerCardToday.textContent = 'Today: —';
         if (partnerTabStatus) {
             partnerTabStatus.textContent = '—';
             partnerTabStatus.style.color = 'var(--text-muted)';
+        }
+        if (partnerCardWrapper) {
+            partnerCardWrapper.classList.add('presence-card--waiting');
+            partnerCardWrapper.classList.remove('presence-card--linked');
         }
         return;
     }
@@ -1373,10 +1392,13 @@ async function loadPartner() {
     const initial = (partnerProfile.display_name || 'P').charAt(0).toUpperCase();
 
     // Update partner card UI
-    partnerCardWrapper.style.opacity = '1';
+    if (partnerCardWrapper) {
+        partnerCardWrapper.classList.remove('presence-card--waiting');
+        partnerCardWrapper.classList.add('presence-card--linked');
+    }
     partnerAvatarLetter.textContent = initial;
     partnerCardName.textContent = partnerProfile.display_name || 'Partner';
-    partnerCardName.style.color = 'var(--text-main)';
+    partnerCardName.classList.remove('presence-card__name--muted');
 
     // Check if partner has an active session
     await checkPartnerSession();
@@ -1408,6 +1430,9 @@ async function loadPartner() {
         .subscribe();
 
     startPartnerPoll();
+    } finally {
+        if (partnerLoading) partnerLoading.classList.add('hidden');
+    }
 }
 
 async function checkPartnerSession() {
@@ -1568,15 +1593,14 @@ async function renderSubjectChart(userId) {
     chartContainer.style.display = '';
     placeholder.style.display = 'none';
 
-    // Color palette
     const colors = [
+        'var(--task-stripe-1)', 'var(--task-stripe-2)', 'var(--task-stripe-3)',
+        'var(--task-stripe-4)', 'var(--task-stripe-5)', 'var(--task-stripe-6)',
         'var(--mocha)', 'var(--latte)', 'var(--espresso)', 'var(--creamy-latte)',
-        '#8B6F47', '#A0522D', '#D2B48C', '#BC8F8F'
     ];
 
-    // Build SVG donut arcs
     let offset = 0;
-    let arcsHtml = `<circle cx="18" cy="18" r="15.915" fill="none" stroke-width="3" style="stroke: var(--creamy-latte); opacity: 0.4;" />`;
+    let arcsHtml = `<circle cx="18" cy="18" r="15.915" fill="none" stroke-width="3" style="stroke: var(--timer-ring-track); opacity: 0.45;" />`;
     entries.forEach(([, sec], i) => {
         const pct = (sec / totalSec) * 100;
         const color = colors[i % colors.length];
@@ -1615,7 +1639,357 @@ async function renderSubjectChart(userId) {
     `;
 }
 
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function startOfWeekMondayLocal(d = new Date()) {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+    const day = x.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    x.setDate(x.getDate() + diff);
+    return x;
+}
+
+function formatHourLabel12(hour) {
+    const h12 = hour % 12 === 0 ? 12 : hour % 12;
+    const ap = hour < 12 ? 'AM' : 'PM';
+    return `${h12} ${ap}`;
+}
+
+/** e.g. 7 → "7pm", 0 → "12am" (for weekly stats best-hour display). */
+function formatHourLabelLowercase(hour) {
+    const h12 = hour % 12 === 0 ? 12 : hour % 12;
+    const ap = hour < 12 ? 'am' : 'pm';
+    return `${h12}${ap}`;
+}
+
+function renderMyCardTodayLine() {
+    const el = document.getElementById('my-card-today');
+    if (!el) return;
+    let live = 0;
+    if (currentSessionId && (timerState === 'studying' || timerState === 'paused')) {
+        live = getLiveStudyElapsedSeconds();
+    }
+    const total = myTodayCompletedFromDb + live;
+    el.textContent = `Today: ${formatDuration(total)}`;
+}
+
+function medianSorted(arr) {
+    if (!arr.length) return null;
+    const s = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function sessionStartPersonaFromMedianMinutes(medMin) {
+    if (medMin == null) return null;
+    if (medMin < 12 * 60) return { label: 'Morning person' };
+    if (medMin < 17 * 60) return { label: 'Afternoon studier' };
+    return { label: 'Night owl' };
+}
+
+async function fetchAllCompletedSessions(userId) {
+    const out = [];
+    let from = 0;
+    const page = 1000;
+    for (;;) {
+        const { data, error } = await sb
+            .from('sessions')
+            .select('started_at, duration_seconds, subject')
+            .eq('user_id', userId)
+            .eq('is_active', false)
+            .order('started_at', { ascending: true })
+            .range(from, from + page - 1);
+        if (error) {
+            console.warn('fetch sessions:', error.message);
+            break;
+        }
+        if (!data?.length) break;
+        out.push(...data);
+        if (data.length < page) break;
+        from += page;
+    }
+    return out;
+}
+
+function renderWeeklySummaryCard(allSessions) {
+    const minEl = document.getElementById('week-stat-minutes');
+    const sessEl = document.getElementById('week-stat-sessions');
+    const bestMainEl = document.getElementById('week-stat-best-hour-main');
+    const bestSubEl = document.getElementById('week-stat-best-hour-sub');
+    const streakEl = document.getElementById('week-stat-day-streak');
+    const sentEl = document.getElementById('week-summary-sentence');
+    if (!minEl || !sessEl || !bestMainEl || !bestSubEl || !streakEl || !sentEl) return;
+
+    const now = new Date();
+    const weekStart = startOfWeekMondayLocal(now);
+    const weekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const prevWeekEnd = new Date(weekStart.getTime() - 1);
+    const prevWeekStart = new Date(weekStart);
+    prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+
+    const inRange = (iso, start, end) => {
+        const t = new Date(iso).getTime();
+        return t >= start.getTime() && t <= end.getTime();
+    };
+
+    const weekSessions = (allSessions || []).filter((s) => s.started_at && inRange(s.started_at, weekStart, weekEnd));
+    const prevWeekSessions = (allSessions || []).filter((s) => s.started_at && inRange(s.started_at, prevWeekStart, prevWeekEnd));
+
+    const totalMin = Math.round(weekSessions.reduce((s, x) => s + (Number(x.duration_seconds) || 0), 0) / 60);
+    const prevMin = Math.round(prevWeekSessions.reduce((s, x) => s + (Number(x.duration_seconds) || 0), 0) / 60);
+
+    sessEl.textContent = String(weekSessions.length);
+    minEl.textContent = String(totalMin);
+
+    const minutesPerHour = new Array(24).fill(0);
+    const dayTotals = new Array(7).fill(0);
+    const subjects = new Set();
+    for (const s of weekSessions) {
+        const d = new Date(s.started_at);
+        const dur = Number(s.duration_seconds) || 0;
+        minutesPerHour[d.getHours()] += dur / 60;
+        dayTotals[d.getDay()] += dur / 60;
+        if (s.subject) subjects.add(s.subject);
+    }
+    let bestH = 0;
+    let bestMin = -1;
+    for (let h = 0; h < 24; h++) {
+        if (minutesPerHour[h] > bestMin) {
+            bestMin = minutesPerHour[h];
+            bestH = h;
+        }
+    }
+    if (weekSessions.length === 0) {
+        bestMainEl.textContent = '—';
+        bestSubEl.textContent = '';
+        bestSubEl.classList.add('hidden');
+    } else if (bestMin < 0.5) {
+        bestMainEl.textContent = 'Mixed times';
+        bestSubEl.textContent = '';
+        bestSubEl.classList.add('hidden');
+    } else {
+        bestMainEl.textContent = formatHourLabelLowercase(bestH);
+        bestSubEl.textContent = `(${Math.round(bestMin)} minutes)`;
+        bestSubEl.classList.remove('hidden');
+    }
+
+    const weekDayKeys = [];
+    const dIter = new Date(weekStart);
+    for (let i = 0; i < 7; i++) {
+        weekDayKeys.push(formatLocalDateKey(dIter));
+        dIter.setDate(dIter.getDate() + 1);
+    }
+    const activeDays = new Set();
+    for (const s of weekSessions) {
+        activeDays.add(formatLocalDateKey(new Date(s.started_at)));
+    }
+    let bestRun = 0;
+    let run = 0;
+    for (const key of weekDayKeys) {
+        if (activeDays.has(key)) {
+            run++;
+            bestRun = Math.max(bestRun, run);
+        } else {
+            run = 0;
+        }
+    }
+    streakEl.textContent = String(bestRun);
+
+    const nSub = subjects.size;
+    let topDayIdx = 0;
+    let topDayAmt = -1;
+    for (let i = 0; i < 7; i++) {
+        if (dayTotals[i] > topDayAmt) {
+            topDayAmt = dayTotals[i];
+            topDayIdx = i;
+        }
+    }
+    const topDayName = WEEKDAY_NAMES[topDayIdx];
+    const dayPart = bestH >= 17 ? 'evenings' : bestH < 12 ? 'mornings' : 'afternoons';
+
+    if (weekSessions.length === 0) {
+        sentEl.textContent = 'Start a focus session to see your weekly summary.';
+        return;
+    }
+
+    const strong = totalMin >= 300;
+    const light = totalMin < 45;
+    const improved = prevMin > 0 && totalMin >= prevMin * 1.15;
+    const pctUp = prevMin > 0 ? Math.round(((totalMin - prevMin) / prevMin) * 100) : 0;
+
+    let sentence;
+    if (strong && nSub >= 3 && topDayAmt >= totalMin * 0.2) {
+        sentence = `Strong week — ${nSub} subjects covered, best focus on ${topDayName} ${dayPart}.`;
+    } else if (strong) {
+        sentence = `Strong week — ${weekSessions.length} sessions and ${totalMin} minutes; peak hour ${formatHourLabel12(bestH)}.`;
+    } else if (improved && totalMin >= 30) {
+        sentence = `You're ahead of last week — about ${pctUp}% more study time on the clock.`;
+    } else if (light) {
+        sentence = 'Quiet week so far — a short session today can keep momentum going.';
+    } else if (bestRun >= 5) {
+        sentence = `Solid rhythm — you studied ${bestRun} separate days this week.`;
+    } else if (nSub === 1 && weekSessions.length >= 2) {
+        const only = [...subjects][0];
+        sentence = `Focused week — most time on ${only}, best hour ${formatHourLabel12(bestH)}.`;
+    } else {
+        sentence = `This week: ${weekSessions.length} sessions, ${totalMin} minutes total — strongest stretch around ${formatHourLabel12(bestH)}.`;
+    }
+    sentEl.textContent = sentence;
+}
+
+function renderSessionStartInsights(allSessions) {
+    const emptyEl = document.getElementById('start-hour-chart-empty');
+    const bodyEl = document.getElementById('start-hour-chart-body');
+    const barsEl = document.getElementById('start-hour-bars');
+    const peakLine = document.getElementById('start-hour-peak-line');
+    const badge = document.getElementById('start-hour-persona-badge');
+    const nudgeEl = document.getElementById('start-hour-nudge');
+
+    if (!barsEl || !peakLine) return;
+
+    const sessions = (allSessions || []).filter((s) => s.started_at);
+    if (sessions.length === 0) {
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        if (bodyEl) bodyEl.classList.add('hidden');
+        if (badge) badge.classList.add('hidden');
+        if (nudgeEl) {
+            nudgeEl.classList.add('hidden');
+            nudgeEl.textContent = '';
+        }
+        peakLine.textContent = 'Total focus time by the hour you start sessions (all time).';
+        return;
+    }
+
+    if (emptyEl) emptyEl.classList.add('hidden');
+    if (bodyEl) bodyEl.classList.remove('hidden');
+
+    const secondsPerHour = new Array(24).fill(0);
+    const minutesFromMidnight = [];
+    for (const s of sessions) {
+        const d = new Date(s.started_at);
+        const sec = Number(s.duration_seconds) || 0;
+        secondsPerHour[d.getHours()] += sec;
+        minutesFromMidnight.push(d.getHours() * 60 + d.getMinutes());
+    }
+    const peakSec = Math.max(...secondsPerHour);
+    const peakHour = secondsPerHour.indexOf(peakSec);
+
+    const medMin = medianSorted(minutesFromMidnight);
+    const persona = sessionStartPersonaFromMedianMinutes(medMin);
+    peakLine.innerHTML = `<span style="color: var(--text-main); font-weight: 600;">Most focus time starts at ${formatHourLabel12(peakHour)}</span><span> — bars show total duration for sessions begun in each hour.</span>`;
+
+    if (badge && persona) {
+        badge.textContent = persona.label;
+        badge.classList.remove('hidden');
+    } else if (badge) {
+        badge.classList.add('hidden');
+    }
+
+    const maxSec = Math.max(peakSec, 1);
+    const BAR_MAX_PX = 110;
+    barsEl.innerHTML = '';
+    for (let h = 0; h < 24; h++) {
+        const col = document.createElement('div');
+        col.className = 'start-hour-bar-col';
+        const stack = document.createElement('div');
+        stack.style.cssText = 'flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;min-height:0;';
+        const bar = document.createElement('div');
+        bar.className = `start-hour-bar${secondsPerHour[h] === peakSec && peakSec > 0 ? ' is-peak' : ''}`;
+        const hPx = secondsPerHour[h] === 0 ? 2 : Math.max(4, Math.round((secondsPerHour[h] / maxSec) * BAR_MAX_PX));
+        bar.style.height = `${hPx}px`;
+        bar.title = `${formatHourLabel12(h)}: ${formatDuration(secondsPerHour[h])} total`;
+        stack.appendChild(bar);
+        const tick = document.createElement('div');
+        tick.className = 'start-hour-tick';
+        tick.textContent = h % 3 === 0 ? formatHourLabel12(h) : '·';
+        col.appendChild(stack);
+        col.appendChild(tick);
+        barsEl.appendChild(col);
+    }
+
+    if (nudgeEl) {
+        nudgeEl.classList.add('hidden');
+        nudgeEl.textContent = '';
+    }
+    const MIN_PEAK_SEC_FOR_NUDGE = 15 * 60;
+    if (!nudgeEl || peakSec < MIN_PEAK_SEC_FOR_NUDGE || sessions.length < 8) return;
+
+    let minH = -1;
+    let maxH = -1;
+    for (let h = 0; h < 24; h++) {
+        if (secondsPerHour[h] > 0) {
+            if (minH < 0) minH = h;
+            maxH = h;
+        }
+    }
+    if (minH < 0) return;
+
+    const inWindow = [];
+    for (let h = minH; h <= maxH; h++) inWindow.push(h);
+    inWindow.sort((a, b) => secondsPerHour[a] - secondsPerHour[b] || a - b);
+    const low = inWindow.filter((h) => secondsPerHour[h] * 3 <= peakSec).slice(0, 3);
+    if (low.length < 2) return;
+
+    low.sort((a, b) => a - b);
+    const parts = low.map((h) => formatHourLabel12(h));
+    const allBeforeTen = low.every((h) => h < 10);
+    const allEvening = low.every((h) => h >= 17);
+    let core;
+    let tail = 'want to start a session then?';
+    if (allBeforeTen && Math.max(...low) <= 9) {
+        core = `You rarely log much time before ${formatHourLabel12(10)}`;
+        tail = 'want to try a morning block?';
+    } else if (allEvening) {
+        core = `You rarely log much time for starts around ${parts.join(' and ')}`;
+        tail = 'want to try an evening session there?';
+    } else if (low.length === 2) {
+        core = `You rarely log much time for starts around ${parts[0]} and ${parts[1]}`;
+    } else {
+        core = `You rarely log much time for starts around ${parts[0]}, ${parts[1]}, and ${parts[2]}`;
+    }
+    nudgeEl.textContent = `${core} — ${tail}`;
+    nudgeEl.classList.remove('hidden');
+}
+
+const STATS_SECTION_LOAD_IDS = [
+    'stats-load-weekly',
+    'stats-load-kpi-streak',
+    'stats-load-kpi-focus',
+    'stats-load-kpi-goal',
+    'stats-load-kpi-points',
+    'stats-load-subject',
+    'stats-load-heatmap',
+    'stats-load-start-hour',
+    'stats-load-focus-logs',
+];
+
+function setStatsSectionLoading(id, loading) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('hidden', !loading);
+}
+
+function showStatsSectionLoaders() {
+    STATS_SECTION_LOAD_IDS.forEach((id) => setStatsSectionLoading(id, true));
+}
+
+function hideStatsSectionLoader(id) {
+    setStatsSectionLoading(id, false);
+}
+
+function hideAllStatsSectionLoaders() {
+    STATS_SECTION_LOAD_IDS.forEach((id) => setStatsSectionLoading(id, false));
+}
+
 async function loadStatsFor(userId, profile) {
+    if (!userId) return;
+
+    const gen = ++statsLoadGeneration;
+    const statsVisible = statsView && !statsView.classList.contains('hidden');
+    if (statsVisible) showStatsSectionLoaders();
+
+    try {
     // Streaks
     if (profile) {
         const streak = document.getElementById('stat-streak');
@@ -1629,38 +2003,38 @@ async function loadStatsFor(userId, profile) {
         const ptsEl = document.getElementById('stat-points');
         if (ptsEl) ptsEl.textContent = profile.total_task_points ?? 0;
     }
+    hideStatsSectionLoader('stats-load-kpi-streak');
+    hideStatsSectionLoader('stats-load-kpi-points');
 
-    // Total hours and session count
-    const { data: sessions } = await sb
-        .from('sessions')
-        .select('duration_seconds')
-        .eq('user_id', userId)
-        .eq('is_active', false);
+    const allSessions = await fetchAllCompletedSessions(userId);
 
-    if (sessions) {
-        const totalSec = sessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
-        const totalHrs = (totalSec / 3600).toFixed(1);
-        const el = document.getElementById('stat-hours');
-        if (el) el.textContent = totalHrs;
-        const sessEl = document.getElementById('stat-sessions');
-        if (sessEl) sessEl.textContent = sessions.length;
-    }
+    const totalSec = allSessions.reduce((sum, s) => sum + (Number(s.duration_seconds) || 0), 0);
+    const totalHrs = (totalSec / 3600).toFixed(1);
+    const el = document.getElementById('stat-hours');
+    if (el) el.textContent = totalHrs;
+    const sessEl = document.getElementById('stat-sessions');
+    if (sessEl) sessEl.textContent = String(allSessions.length);
 
-    // Today's goal
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    const { data: todaySessions } = await sb
-        .from('sessions')
-        .select('duration_seconds')
-        .eq('user_id', userId)
-        .eq('is_active', false)
-        .gte('started_at', todayStart.toISOString());
-
-    const todaySec = (todaySessions || []).reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+    const todaySec = allSessions.reduce((sum, s) => {
+        if (new Date(s.started_at) >= todayStart) return sum + (Number(s.duration_seconds) || 0);
+        return sum;
+    }, 0);
     updateStatGoalKpi(todaySec, profile?.daily_goal_hours ?? 2);
+    const todayHrsEl = document.getElementById('stat-today-hours');
+    if (todayHrsEl) todayHrsEl.textContent = (todaySec / 3600).toFixed(1);
     if (currentUser && userId === currentUser.id) {
         updateFooterProgress(todaySec);
     }
+    hideStatsSectionLoader('stats-load-kpi-focus');
+    hideStatsSectionLoader('stats-load-kpi-goal');
+
+    renderWeeklySummaryCard(allSessions);
+    hideStatsSectionLoader('stats-load-weekly');
+
+    renderSessionStartInsights(allSessions);
+    hideStatsSectionLoader('stats-load-start-hour');
 
     // Heatmap
     heatmapGrid.innerHTML = '';
@@ -1691,11 +2065,17 @@ async function loadStatsFor(userId, profile) {
         cell.title = `${key}: ${formatDuration(sec)}`;
         heatmapGrid.appendChild(cell);
     }
+    hideStatsSectionLoader('stats-load-heatmap');
 
     // Render subject distribution chart
     await renderSubjectChart(userId);
+    hideStatsSectionLoader('stats-load-subject');
 
     await fetchAndRenderFocusLogs(userId);
+    hideStatsSectionLoader('stats-load-focus-logs');
+    } finally {
+        if (gen === statsLoadGeneration) hideAllStatsSectionLoaders();
+    }
 }
 
 // =============================================
@@ -1705,9 +2085,9 @@ const TASK_COLORS = [
     { key: 'mocha' },
     { key: 'latte' },
     { key: 'espresso' },
-    { key: 'green' },
-    { key: 'amber' },
-    { key: 'red' },
+    { key: 'sand' },
+    { key: 'cocoa' },
+    { key: 'taupe' },
 ];
 
 const TODO_POS_KEY = 'studyloop_todo_pos';
@@ -1736,12 +2116,15 @@ function formatLocalDateKey(d) {
 
 function taskStripeCss(key) {
     const map = {
-        mocha: 'var(--task-mocha)',
-        latte: 'var(--task-latte)',
-        espresso: 'var(--task-espresso)',
-        green: 'var(--task-green)',
-        amber: 'var(--task-amber)',
-        red: 'var(--task-red)',
+        mocha: 'var(--task-stripe-1)',
+        latte: 'var(--task-stripe-2)',
+        espresso: 'var(--task-stripe-3)',
+        sand: 'var(--task-stripe-4)',
+        cocoa: 'var(--task-stripe-5)',
+        taupe: 'var(--task-stripe-6)',
+        green: 'var(--task-stripe-4)',
+        amber: 'var(--task-stripe-5)',
+        red: 'var(--task-stripe-6)',
     };
     return map[key] || map.mocha;
 }
@@ -1928,6 +2311,10 @@ function renderCalendarDayPanel() {
 }
 
 async function renderCalendarView() {
+    const grid = document.getElementById('cal-grid');
+    if (grid) {
+        grid.innerHTML = `<div class="cal-grid-loading">${htmlLoadingRing('md')}</div>`;
+    }
     await loadCalendarMonthTasks();
     renderCalendarGrid();
     renderCalendarDayPanel();
@@ -2016,20 +2403,23 @@ async function syncTodayTodoList() {
     lastTodoDateKey = todayKey;
     const list = document.getElementById('todo-list');
     if (!list) return;
+    const gen = ++todoSyncGen;
+    list.innerHTML = '';
     const { data, error } = await sb
         .from('calendar_tasks')
         .select('id,title,color_key,done')
         .eq('user_id', currentUser.id)
         .eq('task_date', todayKey)
         .order('created_at', { ascending: true });
+    if (gen !== todoSyncGen) return;
     if (error) {
-        list.innerHTML = `<p class="text-center text-xs py-3 font-body" style="color: var(--accent-red);">Could not load tasks</p>`;
+        list.innerHTML = `<p class="text-center text-[10px] py-2.5 font-body" style="color: var(--accent-red);">Could not load tasks</p>`;
         return;
     }
     list.innerHTML = '';
     const todos = data || [];
     if (todos.length === 0) {
-        list.innerHTML = '<p class="text-center text-xs py-3 font-body" style="color: var(--text-muted);">No tasks for today — add below or in Calendar.</p>';
+        list.innerHTML = '<p class="text-center text-[10px] py-2.5 font-body" style="color: var(--text-muted);">No tasks for today — add below or in Calendar.</p>';
         return;
     }
     todos.forEach((todo) => {
@@ -2081,14 +2471,14 @@ function setupTodo() {
         <div id="todo-header" class="todo-drag-handle">
             <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-lg" style="color: var(--mocha);">checklist</span>
-                <span class="text-[10px] font-extrabold uppercase tracking-[0.15em]" style="color: var(--text-main);">To-Do</span>
+                <span class="text-[9px] font-extrabold uppercase tracking-[0.15em]" style="color: var(--text-main);">To-Do</span>
             </div>
             <button type="button" id="todo-minimize" class="w-6 h-6 flex items-center justify-center rounded-full" style="color: var(--text-muted);">
                 <span class="material-symbols-outlined text-sm">remove</span>
             </button>
         </div>
         <div id="todo-body">
-            <p id="todo-date-hint" class="text-[9px] font-bold uppercase tracking-wider mb-1 font-body" style="color: var(--text-muted);"></p>
+            <p id="todo-date-hint" class="text-[8px] font-bold uppercase tracking-wider mb-1 font-body" style="color: var(--text-muted);"></p>
             <div id="todo-list"></div>
             <div id="todo-color-row" class="flex gap-1.5 flex-wrap mt-2"></div>
             <form id="todo-form" class="flex gap-2 mt-2">
