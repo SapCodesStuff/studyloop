@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="en" class="h-full" data-theme="light">
 
 <head>
     <meta charset="utf-8" />
@@ -117,9 +117,10 @@
             </div>
 
             <!-- Nav Pill -->
-            <div class="nav-pill-group hide-mobile">
+            <div class="nav-pill-group hide-mobile" style="flex-wrap: wrap; justify-content: center;">
                 <button class="nav-pill active" data-view="dashboard-view">Focus</button>
                 <button class="nav-pill" data-view="stats-view">Statistics</button>
+                <button class="nav-pill" data-view="calendar-view">Calendar</button>
             </div>
 
             <!-- Right -->
@@ -192,6 +193,10 @@
                                 style="color: var(--text-muted);">Waiting...</p>
                             <p id="partner-card-timer" class="text-2xl font-extrabold mt-3 tabular-nums"
                                 style="color: var(--border-coffee);">--:--:--</p>
+                            <p id="partner-card-today" class="text-[10px] font-semibold mt-2 tabular-nums"
+                                style="color: var(--text-muted);">Today: —</p>
+                            <p id="partner-tab-status" class="text-[9px] font-bold uppercase tracking-widest mt-1"
+                                style="color: var(--text-muted);">—</p>
                         </div>
                     </div>
 
@@ -330,7 +335,7 @@
                     </div>
 
                     <!-- KPI Cards -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
                         <!-- Streak -->
                         <div class="card-elevated p-6">
                             <div class="flex items-center gap-2 mb-3">
@@ -388,6 +393,25 @@
                             </div>
                             <div class="goal-bar-track">
                                 <div id="stat-goal-bar" class="goal-bar-fill" style="width: 65%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Task points (calendar tasks) -->
+                        <div class="card-elevated p-6">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="material-symbols-outlined text-lg"
+                                    style="color: var(--accent-amber);">stars</span>
+                                <span class="text-[10px] font-extrabold uppercase tracking-widest font-body"
+                                    style="color: var(--text-muted);">Task Points</span>
+                            </div>
+                            <div class="flex items-baseline gap-2">
+                                <span id="stat-points" class="text-4xl font-extrabold tabular-nums"
+                                    style="color: var(--text-main);">0</span>
+                                <span class="text-sm font-bold uppercase" style="color: var(--latte);">pts</span>
+                            </div>
+                            <div class="mt-3 inline-block text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded"
+                                style="background: rgba(212,160,23,0.12); color: var(--accent-amber); border: 1px solid rgba(212,160,23,0.25);">
+                                +10 per task done
                             </div>
                         </div>
                     </div>
@@ -461,12 +485,13 @@
 
                     <!-- Focus Logs -->
                     <div class="flex flex-col gap-4 pb-24 lg:pb-8">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-lg font-bold flex items-center gap-2" style="color: var(--text-main);"><span
-                                    class="material-symbols-outlined" style="color: var(--mocha);">history</span> Focus
-                                Logs</h3>
-                            <button class="text-xs font-bold hover:underline" style="color: var(--mocha);">View
-                                All</button>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h3 class="text-lg font-bold flex items-center gap-2 min-w-0" style="color: var(--text-main);"><span
+                                    class="material-symbols-outlined flex-shrink-0" style="color: var(--mocha);">history</span> <span class="truncate">Focus
+                                Logs</span></h3>
+                            <button type="button" id="focus-logs-toggle"
+                                class="text-xs font-bold hover:underline hidden" style="color: var(--mocha);">View
+                                all</button>
                         </div>
                         <div id="focus-logs" class="flex flex-col gap-3">
                             <!-- JS fills -->
@@ -476,10 +501,61 @@
                 </div>
             </div>
 
+            <!-- ========== CALENDAR VIEW ========== -->
+            <div id="calendar-view" class="hidden p-6 lg:p-10 overflow-y-auto">
+                <div class="max-w-5xl mx-auto flex flex-col gap-8 animate-fade-in-up pb-24 lg:pb-8">
+                    <div class="text-center">
+                        <h1 class="text-3xl font-extrabold mb-2" style="color: var(--text-main);">Planner</h1>
+                        <p class="text-sm font-body" style="color: var(--text-muted);">Schedule color-coded tasks. Your
+                            floating to-do shows today’s tasks automatically.</p>
+                    </div>
+                    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                        <div class="xl:col-span-2 card-elevated p-6 lg:p-7 flex flex-col gap-4">
+                            <div class="cal-month-nav">
+                                <button type="button" id="cal-prev-month" class="pill-btn pill-btn-outline px-3 py-2"
+                                    title="Previous month">
+                                    <span class="material-symbols-outlined text-xl">chevron_left</span>
+                                </button>
+                                <h2 id="cal-month-title" class="text-lg font-extrabold min-w-[10rem] text-center"
+                                    style="color: var(--text-main);">—</h2>
+                                <button type="button" id="cal-next-month" class="pill-btn pill-btn-outline px-3 py-2"
+                                    title="Next month">
+                                    <span class="material-symbols-outlined text-xl">chevron_right</span>
+                                </button>
+                            </div>
+                            <div class="cal-grid">
+                                <div class="cal-dow">Sun</div>
+                                <div class="cal-dow">Mon</div>
+                                <div class="cal-dow">Tue</div>
+                                <div class="cal-dow">Wed</div>
+                                <div class="cal-dow">Thu</div>
+                                <div class="cal-dow">Fri</div>
+                                <div class="cal-dow">Sat</div>
+                            </div>
+                            <div id="cal-grid" class="cal-grid" style="grid-auto-rows: minmax(52px, 1fr);"></div>
+                        </div>
+                        <div class="cal-day-panel flex flex-col gap-3 min-h-[200px]" id="cal-day-panel">
+                            <h3 id="cal-day-title" class="font-bold text-base" style="color: var(--text-main);">—</h3>
+                            <div id="cal-day-tasks" class="flex-1 min-h-[100px] max-h-[280px] overflow-y-auto"></div>
+                            <form id="cal-add-form" class="flex flex-col gap-2 mt-1">
+                                <label class="text-[10px] font-bold uppercase tracking-widest"
+                                    style="color: var(--text-muted);">Add task</label>
+                                <input type="text" id="cal-add-input" class="pill-input px-4 py-2.5 text-sm" maxlength="500"
+                                    placeholder="What needs doing?" />
+                                <div class="flex items-center gap-1.5 flex-wrap" id="cal-add-colors" aria-label="Task color"></div>
+                                <button type="submit" class="pill-btn pill-btn-primary py-2.5 text-xs w-full">Add to this
+                                    day</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </main>
 
         <!-- ---- FOOTER: Daily Goal (Dashboard only) ---- -->
-        <footer id="dashboard-footer" class="flex-shrink-0 px-6 lg:px-12 py-4 hide-mobile"
+        <footer id="dashboard-footer"
+            class="dashboard-footer-progress flex-shrink-0 px-6 lg:px-12 py-4 z-40"
             style="background: var(--milk-foam); border-top: 1.5px solid var(--border-coffee);">
             <div class="max-w-3xl mx-auto">
                 <div class="flex items-center justify-between mb-2 px-1">
@@ -501,20 +577,27 @@
         </footer>
 
         <!-- ---- MOBILE BOTTOM NAV ---- -->
-        <nav class="hide-desktop fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-4 py-3"
+        <nav class="hide-desktop fixed bottom-0 left-0 right-0 z-50 flex items-end justify-around px-2 py-2 gap-1"
             style="background: var(--milk-foam); border-top: 1.5px solid var(--border-coffee);">
-            <button class="mob-nav-btn active flex flex-col items-center gap-0.5" data-view="dashboard-view">
+            <button class="mob-nav-btn active flex flex-col items-center gap-0.5 flex-1 min-w-0 max-w-[4.5rem]"
+                data-view="dashboard-view">
                 <span class="material-symbols-outlined text-xl">home</span>
-                <span class="text-[9px] font-bold">Focus</span>
+                <span class="text-[8px] font-bold leading-tight text-center">Focus</span>
             </button>
-            <button class="mob-nav-btn flex flex-col items-center gap-0.5" data-view="stats-view"
-                style="color: var(--text-muted);">
+            <button class="mob-nav-btn flex flex-col items-center gap-0.5 flex-1 min-w-0 max-w-[4.5rem]"
+                data-view="stats-view" style="color: var(--text-muted);">
                 <span class="material-symbols-outlined text-xl">analytics</span>
-                <span class="text-[9px] font-bold">Stats</span>
+                <span class="text-[8px] font-bold leading-tight text-center">Stats</span>
             </button>
-            <button id="mob-chat-btn" class="w-12 h-12 rounded-full flex items-center justify-center shadow-lg -mt-6"
+            <button class="mob-nav-btn flex flex-col items-center gap-0.5 flex-1 min-w-0 max-w-[4.5rem]"
+                data-view="calendar-view" style="color: var(--text-muted);">
+                <span class="material-symbols-outlined text-xl">calendar_month</span>
+                <span class="text-[8px] font-bold leading-tight text-center">Calendar</span>
+            </button>
+            <button id="mob-chat-btn" type="button"
+                class="w-11 h-11 rounded-full flex items-center justify-center shadow-lg flex-shrink-0 mb-0.5"
                 style="background: var(--espresso); color: var(--milk-foam);">
-                <span class="material-symbols-outlined text-xl">forum</span>
+                <span class="material-symbols-outlined text-lg">forum</span>
             </button>
         </nav>
 
@@ -603,6 +686,21 @@
                     </div>
                 </div>
 
+                <!-- Appearance -->
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <span class="material-symbols-outlined text-base" style="color: var(--mocha);">dark_mode</span>
+                        <span class="text-[10px] font-extrabold uppercase tracking-[0.15em]" style="color: var(--text-main);">Appearance</span>
+                    </div>
+                    <div class="mt-4 flex items-center justify-between gap-4">
+                        <div>
+                            <span class="settings-label">Dark mode</span>
+                            <p class="text-[10px] font-medium mt-1" style="color: var(--text-muted);">Warm espresso tones for low light.</p>
+                        </div>
+                        <input type="checkbox" id="settings-dark-mode" class="settings-dark-checkbox" title="Toggle dark mode" />
+                    </div>
+                </div>
+
                 <!-- Divider -->
                 <div style="height: 1px; background: var(--border-coffee);"></div>
 
@@ -635,7 +733,7 @@
                     <span class="material-symbols-outlined text-3xl" style="color: var(--accent-red);">warning</span>
                 </div>
                 <h3 class="text-lg font-extrabold" style="color: var(--text-main);">Delete Account?</h3>
-                <p class="text-sm font-body" style="color: var(--text-muted); line-height: 1.7;">This will <strong>permanently delete</strong> your account and all associated data — sessions, messages, subjects, and stats. This action cannot be undone.</p>
+                <p class="text-sm font-body" style="color: var(--text-muted); line-height: 1.7;">This will <strong>permanently delete</strong> your account and all associated data — sessions, messages, subjects, planner tasks, and stats. This action cannot be undone.</p>
                 <div class="flex gap-3 w-full mt-2">
                     <button id="delete-cancel" class="pill-btn pill-btn-outline flex-1 py-3 text-xs">Cancel</button>
                     <button id="delete-confirm" class="pill-btn flex-1 py-3 text-xs" style="background: var(--accent-red); color: white;">Delete Forever</button>

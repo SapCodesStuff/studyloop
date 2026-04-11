@@ -27,6 +27,7 @@ const authError = $('#auth-error');
 // Views
 const dashboardView = $('#dashboard-view');
 const statsView = $('#stats-view');
+const calendarView = $('#calendar-view');
 const dashboardFooter = $('#dashboard-footer');
 
 // Nav
@@ -63,6 +64,8 @@ const partnerCardName = $('#partner-card-name');
 const partnerStatusText = $('#partner-status-text');
 const partnerPresenceDot = $('#partner-presence-dot');
 const partnerCardTimer = $('#partner-card-timer');
+const partnerCardToday = $('#partner-card-today');
+const partnerTabStatus = $('#partner-tab-status');
 
 // Chat
 const chatPanel = $('#chat-panel');
@@ -93,18 +96,50 @@ let currentUser = null;
 let userProfile = null;
 let partnerProfile = null;
 let partnerTimerInterval = null;
-let partnerTimerSeconds = 0;
+/** Wall-clock ms when partner's active session started (null if idle) */
+let partnerSessionStartMs = null;
+/** Completed session seconds for partner for local calendar day (excludes live active session) */
+let partnerTodayCompletedSum = 0;
+/** Partner's last_app_activity_at as epoch ms (0 = unknown) */
+let partnerLastActivityAtMs = 0;
+let studySegmentStartMs = null;
+let pausedAccumulatedSeconds = 0;
+let appPresenceIntervalId = null;
+let partnerProfilePollIntervalId = null;
+let currentSessionId = null;
+let calendarRealtimeChannel = null;
+let lastTodoDateKey = null;
+let todoDateCheckIntervalId = null;
+let focusLogsExpanded = false;
+
+const PARTNER_LIVE_MS = 90 * 1000;
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * 130; // ~816.81
 
 // =============================================
 // Initialization
 // =============================================
+function initTheme() {
+    const stored = localStorage.getItem('studyloop_theme');
+    const dark = stored === 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+}
+
+function applyTheme(dark) {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('studyloop_theme', dark ? 'dark' : 'light');
+    const cb = document.getElementById('settings-dark-mode');
+    if (cb) cb.checked = dark;
+}
+
 async function init() {
+    initTheme();
     setupNav();
     setupAuth();
     setupTimer();
     setupChat();
     setupSettings();
+    setupCalendar();
+    setupFocusLogsToggle();
 
     // Check if user is already logged in
     const { data: { session } } = await sb.auth.getSession();
@@ -120,7 +155,20 @@ async function init() {
         if (event === 'SIGNED_OUT') {
             currentUser = null;
             userProfile = null;
+            clearDashboardIntervalsAndPresence();
             showAuth();
+        }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        if (timerState === 'studying') refreshStudyTimerUI();
+        tickPartnerUI();
+        sendAppPresencePing();
+        if (currentUser) {
+            syncTodayTodoList();
+            const cal = document.getElementById('calendar-view');
+            if (cal && !cal.classList.contains('hidden')) renderCalendarView();
         }
     });
 }
@@ -238,13 +286,16 @@ async function onLoginSuccess() {
     await loadChatHistory();
     await loadStats();
     await loadPartner();
+    startAppPresenceLoop();
     setupStatsToggle();
+    subscribeCalendarTasksRealtime();
 
     // Setup todo widget (only after login)
     if (!document.getElementById('todo-widget')) {
         setupTodo();
     } else {
         document.getElementById('todo-widget').style.display = '';
+        syncTodayTodoList();
     }
 }
 
@@ -266,6 +317,8 @@ async function fetchUserProfile() {
         headerInitial.textContent = initial;
         myAvatarLetter.textContent = initial;
         myCardName.textContent = data.display_name || 'Me';
+        const pts = document.getElementById('stat-points');
+        if (pts) pts.textContent = data.total_task_points ?? 0;
     }
 }
 
@@ -310,33 +363,7 @@ async function loadSessions() {
         .order('started_at', { ascending: false })
         .limit(10);
 
-    focusLogs.innerHTML = '';
-    if (!error && data && data.length > 0) {
-        data.forEach((session, i) => {
-            const item = document.createElement('div');
-            item.className = 'session-item animate-fade-in-up';
-            item.style.animationDelay = `${i * 0.08}s`;
-            const dur = formatDuration(session.duration_seconds);
-            const when = formatSessionDate(session.started_at);
-            item.innerHTML = `
-        <div class="flex items-center gap-4">
-          <div class="w-11 h-11 rounded-lg flex items-center justify-center" style="background: rgba(230,213,195,0.4); color: var(--mocha);">
-            <span class="material-symbols-outlined">menu_book</span>
-          </div>
-          <div>
-            <p class="font-bold text-sm" style="color: var(--text-main);">${session.subject}</p>
-            <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: var(--text-muted);">${when}</p>
-          </div>
-        </div>
-        <div class="text-right">
-          <p class="font-bold tabular-nums" style="color: var(--text-main);">${dur}</p>
-        </div>
-      `;
-            focusLogs.appendChild(item);
-        });
-    } else {
-        focusLogs.innerHTML = '<p class="text-center text-sm py-8" style="color: var(--text-muted);">No sessions yet. Start your first focus session!</p>';
-    }
+    // Focus logs live under Statistics; populated by loadStats / loadStatsFor
 
     // Also check for active session to recover
     const { data: activeData } = await sb
@@ -347,11 +374,12 @@ async function loadSessions() {
         .maybeSingle();
 
     if (activeData) {
-        // Recover active session
+        // Recover active session (wall-clock elapsed; not dependent on tab visibility)
+        currentSessionId = activeData.id;
         currentSubject = activeData.subject;
-        const elapsed = Math.floor((Date.now() - new Date(activeData.started_at).getTime()) / 1000);
-        timerSeconds = elapsed;
-        startTimer(true); // true = recovering, don't reset seconds
+        pausedAccumulatedSeconds = 0;
+        studySegmentStartMs = new Date(activeData.started_at).getTime();
+        startTimer(true); // true = recovering, don't insert session / reset anchors
     }
 }
 
@@ -400,6 +428,9 @@ async function loadStats() {
 
         const goalTarget = document.getElementById('stat-goal-total');
         if (goalTarget) goalTarget.textContent = userProfile.daily_goal_hours || 2;
+
+        const ptsEl = document.getElementById('stat-points');
+        if (ptsEl) ptsEl.textContent = userProfile.total_task_points ?? 0;
     }
 
     // Fetch total hours and session count
@@ -418,7 +449,7 @@ async function loadStats() {
         if (sessEl) sessEl.textContent = sessions.length;
     }
 
-    // Today's goal progress
+    // Today's goal progress (stats KPI + footer use current daily goal from profile)
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const { data: todaySessions } = await sb
@@ -428,24 +459,11 @@ async function loadStats() {
         .eq('is_active', false)
         .gte('started_at', todayStart.toISOString());
 
-    if (todaySessions) {
-        const todaySec = todaySessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
-        const todayHrs = (todaySec / 3600).toFixed(2);
-        const goalHrs = userProfile?.daily_goal_hours || 2;
-        const pct = goalHrs > 0 ? Math.min(Math.round((todayHrs / goalHrs) * 100), 100) : 0;
-
-        const pctEl = document.getElementById('stat-goal-pct');
-        const doneEl = document.getElementById('stat-goal-done');
-        const barEl = document.getElementById('stat-goal-bar');
-        const footerDone = document.getElementById('footer-done');
-        const footerBar = document.getElementById('footer-bar');
-
-        if (pctEl) pctEl.textContent = pct;
-        if (doneEl) doneEl.textContent = parseFloat(todayHrs).toFixed(1);
-        if (barEl) barEl.style.width = pct + '%';
-        if (footerDone) footerDone.textContent = formatDuration(todaySec);
-        if (footerBar) footerBar.style.width = pct + '%';
+    const todaySec = (todaySessions || []).reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+    if (userProfile) {
+        updateStatGoalKpi(todaySec, userProfile.daily_goal_hours);
     }
+    updateFooterProgress(todaySec);
 
     // Populate heatmap from daily_stats
     heatmapGrid.innerHTML = '';
@@ -481,16 +499,23 @@ async function loadStats() {
 
     // Render subject distribution chart
     await renderSubjectChart(currentUser.id);
+
+    await fetchAndRenderFocusLogs(currentUser.id);
 }
 
 // =============================================
 // Navigation
 // =============================================
 function setupNav() {
-    const views = { 'dashboard-view': dashboardView, 'stats-view': statsView };
+    const views = {
+        'dashboard-view': dashboardView,
+        'stats-view': statsView,
+        'calendar-view': calendarView,
+    };
 
     function switchView(viewId) {
         Object.entries(views).forEach(([id, el]) => {
+            if (!el) return;
             el.classList.toggle('hidden', id !== viewId);
         });
         dashboardFooter.classList.toggle('hidden', viewId !== 'dashboard-view');
@@ -502,6 +527,28 @@ function setupNav() {
             b.classList.toggle('active', isActive);
             b.style.color = isActive ? 'var(--text-main)' : 'var(--text-muted)';
         });
+
+        // Auto-refresh stats data when switching to stats view
+        if (viewId === 'stats-view' && currentUser) {
+            const selectedRadio = document.querySelector('input[name="stats-toggle"]:checked');
+            if (selectedRadio && selectedRadio.value === 'partner' && partnerProfile) {
+                // Re-fetch partner profile for fresh data
+                sb.from('users').select('*').eq('id', partnerProfile.id).maybeSingle().then(({ data }) => {
+                    if (data) partnerProfile = data;
+                    loadStatsFor(partnerProfile.id, partnerProfile);
+                });
+            } else {
+                fetchUserProfile().then(() => loadStatsFor(currentUser.id, userProfile));
+            }
+        }
+
+        if (viewId === 'calendar-view' && currentUser) {
+            renderCalendarView();
+        }
+
+        if (viewId === 'dashboard-view' && currentUser && userProfile) {
+            refreshFooterTodayProgress();
+        }
     }
 
     navPills.forEach(p => p.addEventListener('click', () => switchView(p.dataset.view)));
@@ -531,6 +578,11 @@ function openSettingsModal() {
         const goalVal = userProfile.daily_goal_hours || 2;
         $('#settings-goal-value').textContent = goalVal;
         $('#settings-goal-value').dataset.value = goalVal;
+    }
+
+    const darkToggle = document.getElementById('settings-dark-mode');
+    if (darkToggle) {
+        darkToggle.checked = document.documentElement.getAttribute('data-theme') === 'dark';
     }
 
     // Hide status
@@ -576,6 +628,11 @@ function setupSettings() {
             if (deleteModal) deleteModal.classList.add('hidden');
         }
     });
+
+    const darkModeToggle = document.getElementById('settings-dark-mode');
+    if (darkModeToggle) {
+        darkModeToggle.addEventListener('change', () => applyTheme(darkModeToggle.checked));
+    }
 
     // ---- Save Display Name ----
     const saveDisplayName = $('#save-display-name');
@@ -759,6 +816,71 @@ function setupSettings() {
 }
 
 // =============================================
+// Tab visibility / presence (partner "Live" + accurate timers)
+// =============================================
+function clearDashboardIntervalsAndPresence() {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    clearInterval(appPresenceIntervalId);
+    appPresenceIntervalId = null;
+    clearInterval(partnerProfilePollIntervalId);
+    partnerProfilePollIntervalId = null;
+    clearInterval(todoDateCheckIntervalId);
+    todoDateCheckIntervalId = null;
+    if (partnerTimerInterval) {
+        clearInterval(partnerTimerInterval);
+        partnerTimerInterval = null;
+    }
+    if (calendarRealtimeChannel) {
+        sb.removeChannel(calendarRealtimeChannel);
+        calendarRealtimeChannel = null;
+    }
+    currentSessionId = null;
+    studySegmentStartMs = null;
+    pausedAccumulatedSeconds = 0;
+    partnerProfile = null;
+    partnerSessionStartMs = null;
+    partnerLastActivityAtMs = 0;
+    focusLogsExpanded = false;
+}
+
+function sendAppPresencePing() {
+    if (!currentUser || document.visibilityState !== 'visible') return;
+    sb.from('users').update({ last_app_activity_at: new Date().toISOString() })
+        .eq('id', currentUser.id)
+        .then(({ error }) => {
+            if (error && error.message && !window._presencePingWarned) {
+                window._presencePingWarned = true;
+                console.warn('Presence ping failed (run schema migration for last_app_activity_at):', error.message);
+            }
+        });
+}
+
+function startAppPresenceLoop() {
+    clearInterval(appPresenceIntervalId);
+    sendAppPresencePing();
+    appPresenceIntervalId = setInterval(sendAppPresencePing, 30000);
+}
+
+function getLiveStudyElapsedSeconds() {
+    if (timerState === 'idle') return 0;
+    if (timerState === 'paused') return pausedAccumulatedSeconds;
+    if (!studySegmentStartMs) return pausedAccumulatedSeconds;
+    return pausedAccumulatedSeconds + Math.floor((Date.now() - studySegmentStartMs) / 1000);
+}
+
+function refreshStudyTimerUI() {
+    if (timerState === 'idle') return;
+    timerSeconds = getLiveStudyElapsedSeconds();
+    const display = formatTime(timerSeconds);
+    timerDisplay.textContent = display;
+    myCardTimer.textContent = display;
+    const maxSeconds = 7200;
+    const progress = Math.min(timerSeconds / maxSeconds, 1);
+    timerRing.style.strokeDashoffset = TIMER_RING_CIRCUMFERENCE * (1 - progress);
+}
+
+// =============================================
 // Timer
 // =============================================
 function setupTimer() {
@@ -807,7 +929,11 @@ function filterSubjects(query) {
 
 async function startTimer(recovering = false) {
     timerState = 'studying';
-    if (!recovering) timerSeconds = 0;
+    if (!recovering) {
+        timerSeconds = 0;
+        pausedAccumulatedSeconds = 0;
+        studySegmentStartMs = Date.now();
+    }
 
     // UI updates
     controlsIdle.classList.add('hidden');
@@ -857,28 +983,37 @@ async function startTimer(recovering = false) {
     }
 
     timerInterval = setInterval(tickTimer, 1000);
+    refreshStudyTimerUI();
 }
 
-let currentSessionId = null;
-let heartbeatInterval = null;
-
 function pauseTimer() {
+    if (studySegmentStartMs !== null) {
+        pausedAccumulatedSeconds += Math.floor((Date.now() - studySegmentStartMs) / 1000);
+        studySegmentStartMs = null;
+    }
     timerState = 'paused';
     clearInterval(timerInterval);
+    timerInterval = null;
+    timerSeconds = pausedAccumulatedSeconds;
     pauseIcon.textContent = 'play_arrow';
     pauseText.textContent = 'Resume';
 }
 
 function resumeTimer() {
     timerState = 'studying';
+    studySegmentStartMs = Date.now();
     pauseIcon.textContent = 'pause';
     pauseText.textContent = 'Pause';
     timerInterval = setInterval(tickTimer, 1000);
 }
 
 async function stopTimer() {
+    const finalSeconds = getLiveStudyElapsedSeconds();
     timerState = 'idle';
     clearInterval(timerInterval);
+    timerInterval = null;
+    studySegmentStartMs = null;
+    pausedAccumulatedSeconds = 0;
 
     // Save to Supabase
     if (currentSessionId && currentUser) {
@@ -887,7 +1022,7 @@ async function stopTimer() {
             .update({
                 is_active: false,
                 ended_at: new Date().toISOString(),
-                duration_seconds: timerSeconds,
+                duration_seconds: finalSeconds,
             })
             .eq('id', currentSessionId);
         currentSessionId = null;
@@ -916,19 +1051,10 @@ async function stopTimer() {
 }
 
 function tickTimer() {
-    timerSeconds++;
-    const display = formatTime(timerSeconds);
-    timerDisplay.textContent = display;
-    myCardTimer.textContent = display;
+    refreshStudyTimerUI();
 
-    // Animate ring (2hr max for visual fill)
-    const maxSeconds = 7200;
-    const progress = Math.min(timerSeconds / maxSeconds, 1);
-    const offset = TIMER_RING_CIRCUMFERENCE * (1 - progress);
-    timerRing.style.strokeDashoffset = offset;
-
-    // Heartbeat every 30 seconds
-    if (timerSeconds % 30 === 0 && currentSessionId && currentUser) {
+    // Heartbeat every 30 seconds (wall-clock seconds, correct after background tabs)
+    if (timerSeconds > 0 && timerSeconds % 30 === 0 && currentSessionId && currentUser) {
         sb.from('sessions').update({
             last_heartbeat_at: new Date().toISOString(),
             duration_seconds: timerSeconds,
@@ -949,6 +1075,132 @@ function formatDuration(seconds) {
     const m = Math.floor((seconds % 3600) / 60);
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
+}
+
+function updateFooterProgress(todaySec) {
+    if (!userProfile) return;
+    const goalHrs = Number(userProfile.daily_goal_hours) || 2;
+    const goalSec = Math.max(0, Math.round(goalHrs * 3600));
+    const pct = goalSec > 0 ? Math.min(Math.round((todaySec / goalSec) * 100), 100) : 0;
+    const footerDone = document.getElementById('footer-done');
+    const footerGoal = document.getElementById('footer-goal');
+    const footerBar = document.getElementById('footer-bar');
+    if (footerDone) footerDone.textContent = formatDuration(todaySec);
+    if (footerGoal) footerGoal.textContent = formatDuration(goalSec);
+    if (footerBar) footerBar.style.width = `${pct}%`;
+}
+
+function updateStatGoalKpi(todaySec, goalHrs) {
+    const gh = Number(goalHrs) || 2;
+    const todayHrsNum = todaySec / 3600;
+    const pct = gh > 0 ? Math.min(Math.round((todayHrsNum / gh) * 100), 100) : 0;
+    const pctEl = document.getElementById('stat-goal-pct');
+    const doneEl = document.getElementById('stat-goal-done');
+    const barEl = document.getElementById('stat-goal-bar');
+    if (pctEl) pctEl.textContent = pct;
+    if (doneEl) doneEl.textContent = todayHrsNum.toFixed(1);
+    if (barEl) barEl.style.width = `${pct}%`;
+}
+
+async function refreshFooterTodayProgress() {
+    if (!currentUser || !userProfile) return;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const { data } = await sb
+        .from('sessions')
+        .select('duration_seconds')
+        .eq('user_id', currentUser.id)
+        .eq('is_active', false)
+        .gte('started_at', todayStart.toISOString());
+    const todaySec = (data || []).reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+    updateFooterProgress(todaySec);
+}
+
+function setupFocusLogsToggle() {
+    const btn = document.getElementById('focus-logs-toggle');
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', async () => {
+        focusLogsExpanded = !focusLogsExpanded;
+        const radio = document.querySelector('input[name="stats-toggle"]:checked');
+        if (currentUser && radio?.value === 'partner' && partnerProfile) {
+            await loadStatsFor(partnerProfile.id, partnerProfile);
+        } else if (currentUser && userProfile) {
+            await loadStatsFor(currentUser.id, userProfile);
+        }
+    });
+}
+
+async function fetchAndRenderFocusLogs(userId) {
+    if (!focusLogs || !userId) return;
+    const qLimit = focusLogsExpanded ? 50 : 5;
+    const { data, error } = await sb
+        .from('sessions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_active', false)
+        .order('started_at', { ascending: false })
+        .limit(qLimit);
+
+    const sessions = data || [];
+    const hasMoreInDb = !focusLogsExpanded && sessions.length > 4;
+    const rows = focusLogsExpanded ? sessions : sessions.slice(0, 4);
+
+    focusLogs.innerHTML = '';
+    const toggleBtn = document.getElementById('focus-logs-toggle');
+    if (error) {
+        focusLogs.innerHTML = '<p class="text-center text-sm py-6 font-body" style="color: var(--accent-red);">Could not load logs.</p>';
+        if (toggleBtn) toggleBtn.classList.add('hidden');
+        return;
+    }
+
+    if (rows.length === 0) {
+        focusLogs.innerHTML = '<p class="text-center text-sm py-8 font-body" style="color: var(--text-muted);">No sessions yet.</p>';
+        if (toggleBtn) toggleBtn.classList.add('hidden');
+        return;
+    }
+
+    rows.forEach((session, i) => {
+        const item = document.createElement('div');
+        item.className = 'session-item animate-fade-in-up';
+        item.style.animationDelay = `${i * 0.08}s`;
+        const dur = formatDuration(session.duration_seconds);
+        const when = formatSessionDate(session.started_at);
+        item.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <div class="w-11 h-11 rounded-lg flex items-center justify-center" style="background: rgba(230,213,195,0.4); color: var(--mocha);">
+                        <span class="material-symbols-outlined">menu_book</span>
+                    </div>
+                    <div>
+                        <p class="font-bold text-sm" style="color: var(--text-main);">${session.subject}</p>
+                        <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: var(--text-muted);">${when}</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <p class="font-bold tabular-nums" style="color: var(--text-main);">${dur}</p>
+                </div>
+            `;
+        focusLogs.appendChild(item);
+    });
+
+    if (toggleBtn) {
+        if (focusLogsExpanded) {
+            toggleBtn.textContent = 'Show less';
+            toggleBtn.classList.remove('hidden');
+        } else if (hasMoreInDb) {
+            toggleBtn.textContent = 'View all';
+            toggleBtn.classList.remove('hidden');
+        } else {
+            toggleBtn.classList.add('hidden');
+        }
+    }
+}
+
+function getLocalDayBounds() {
+    const n = new Date();
+    const start = new Date(n.getFullYear(), n.getMonth(), n.getDate(), 0, 0, 0, 0);
+    const end = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1, 0, 0, 0, 0);
+    return { start, end };
 }
 
 function formatSessionDate(isoString) {
@@ -1024,6 +1276,75 @@ function addChatMessage(text, isOutgoing, time) {
 // =============================================
 // Partner Presence
 // =============================================
+function stopPartnerPoll() {
+    clearInterval(partnerProfilePollIntervalId);
+    partnerProfilePollIntervalId = null;
+}
+
+function startPartnerPoll() {
+    clearInterval(partnerProfilePollIntervalId);
+    partnerProfilePollIntervalId = setInterval(fetchPartnerPresence, 15000);
+    fetchPartnerPresence();
+}
+
+async function fetchPartnerPresence() {
+    if (!partnerProfile || !currentUser) return;
+    const { data, error } = await sb
+        .from('users')
+        .select('last_app_activity_at')
+        .eq('id', partnerProfile.id)
+        .maybeSingle();
+    if (error || !data) return;
+    partnerLastActivityAtMs = data.last_app_activity_at
+        ? new Date(data.last_app_activity_at).getTime()
+        : 0;
+    tickPartnerUI();
+}
+
+async function refreshPartnerTodayTotals() {
+    if (!partnerProfile) return;
+    const { start, end } = getLocalDayBounds();
+    const { data, error } = await sb
+        .from('sessions')
+        .select('duration_seconds, is_active, started_at')
+        .eq('user_id', partnerProfile.id)
+        .gte('started_at', start.toISOString())
+        .lt('started_at', end.toISOString());
+    if (error) return;
+    let completed = 0;
+    for (const s of data || []) {
+        if (!s.is_active) completed += s.duration_seconds || 0;
+    }
+    partnerTodayCompletedSum = completed;
+}
+
+function updatePartnerTabStatusUI() {
+    if (!partnerTabStatus) return;
+    const fresh = partnerLastActivityAtMs > 0 && (Date.now() - partnerLastActivityAtMs < PARTNER_LIVE_MS);
+    partnerTabStatus.textContent = fresh ? 'Live' : 'Tab closed';
+    partnerTabStatus.style.color = fresh ? 'var(--accent-green)' : 'var(--text-muted)';
+}
+
+function partnerLiveSecondsForTodayTotal() {
+    if (partnerSessionStartMs == null) return 0;
+    const { start } = getLocalDayBounds();
+    const effectiveStart = Math.max(partnerSessionStartMs, start.getTime());
+    return Math.floor((Date.now() - effectiveStart) / 1000);
+}
+
+function tickPartnerUI() {
+    if (!partnerProfile || !partnerCardToday) return;
+    const liveSession = partnerSessionStartMs != null
+        ? Math.floor((Date.now() - partnerSessionStartMs) / 1000)
+        : 0;
+    if (partnerSessionStartMs != null) {
+        partnerCardTimer.textContent = formatTime(liveSession);
+    }
+    const todayTotal = partnerTodayCompletedSum + partnerLiveSecondsForTodayTotal();
+    partnerCardToday.textContent = `Today: ${formatDuration(todayTotal)}`;
+    updatePartnerTabStatusUI();
+}
+
 async function loadPartner() {
     if (!currentUser) return;
 
@@ -1035,9 +1356,16 @@ async function loadPartner() {
         .limit(1);
 
     if (error || !allUsers || allUsers.length === 0) {
-        // No partner found yet
+        stopPartnerPoll();
+        partnerLastActivityAtMs = 0;
+        partnerSessionStartMs = null;
         partnerCardName.textContent = 'No partner yet';
         partnerStatusText.textContent = 'Invite someone!';
+        if (partnerCardToday) partnerCardToday.textContent = 'Today: —';
+        if (partnerTabStatus) {
+            partnerTabStatus.textContent = '—';
+            partnerTabStatus.style.color = 'var(--text-muted)';
+        }
         return;
     }
 
@@ -1060,10 +1388,26 @@ async function loadPartner() {
             schema: 'public',
             table: 'sessions',
             filter: `user_id=eq.${partnerProfile.id}`
-        }, () => {
-            checkPartnerSession();
+        }, async () => {
+            await checkPartnerSession();
+
+            // If stats view is open and showing partner stats, auto-refresh
+            const statsViewEl = document.getElementById('stats-view');
+            const selectedRadio = document.querySelector('input[name="stats-toggle"]:checked');
+            if (statsViewEl && !statsViewEl.classList.contains('hidden') && selectedRadio && selectedRadio.value === 'partner') {
+                // Re-fetch partner profile for updated streaks
+                const { data: freshPartner } = await sb
+                    .from('users')
+                    .select('*')
+                    .eq('id', partnerProfile.id)
+                    .maybeSingle();
+                if (freshPartner) partnerProfile = freshPartner;
+                await loadStatsFor(partnerProfile.id, partnerProfile);
+            }
         })
         .subscribe();
+
+    startPartnerPoll();
 }
 
 async function checkPartnerSession() {
@@ -1076,21 +1420,19 @@ async function checkPartnerSession() {
         .eq('is_active', true)
         .maybeSingle();
 
-    // Clear any existing partner timer
     if (partnerTimerInterval) {
         clearInterval(partnerTimerInterval);
         partnerTimerInterval = null;
     }
 
     let isActuallyStudying = false;
+    let sessionRow = activeSession;
 
     if (activeSession) {
-        // Check for stale session (heartbeat older than 2 minutes = abandoned)
         const heartbeat = new Date(activeSession.last_heartbeat_at).getTime();
         const staleThreshold = 2 * 60 * 1000; // 2 minutes
 
         if (Date.now() - heartbeat > staleThreshold) {
-            // Mark stale session as inactive
             console.log('Detected stale partner session, marking as inactive...');
             await sb.from('sessions').update({
                 is_active: false,
@@ -1099,34 +1441,25 @@ async function checkPartnerSession() {
                     (new Date(activeSession.last_heartbeat_at).getTime() - new Date(activeSession.started_at).getTime()) / 1000
                 ),
             }).eq('id', activeSession.id);
-            // Fall through to idle state
         } else {
             isActuallyStudying = true;
         }
     }
 
-    if (isActuallyStudying) {
-        // Partner is genuinely studying
-        const elapsed = Math.floor((Date.now() - new Date(activeSession.started_at).getTime()) / 1000);
-        partnerTimerSeconds = elapsed;
+    await refreshPartnerTodayTotals();
 
-        partnerStatusText.textContent = activeSession.subject;
+    if (isActuallyStudying) {
+        partnerSessionStartMs = new Date(sessionRow.started_at).getTime();
+        partnerStatusText.textContent = sessionRow.subject;
         partnerStatusText.style.background = 'var(--espresso)';
         partnerStatusText.style.color = 'var(--milk-foam)';
         partnerStatusText.style.padding = '2px 12px';
         partnerStatusText.style.borderRadius = 'var(--radius-full)';
         partnerPresenceDot.className = 'presence-dot studying';
         partnerCardTimer.style.color = 'var(--espresso)';
-        partnerCardTimer.textContent = formatTime(partnerTimerSeconds);
-
-        // Tick partner timer
-        partnerTimerInterval = setInterval(() => {
-            partnerTimerSeconds++;
-            partnerCardTimer.textContent = formatTime(partnerTimerSeconds);
-        }, 1000);
+        partnerCardTimer.textContent = formatTime(Math.floor((Date.now() - partnerSessionStartMs) / 1000));
     } else {
-        // Partner is idle
-        partnerTimerSeconds = 0;
+        partnerSessionStartMs = null;
         partnerStatusText.textContent = 'Idle';
         partnerStatusText.style.background = '';
         partnerStatusText.style.color = 'var(--text-muted)';
@@ -1136,6 +1469,9 @@ async function checkPartnerSession() {
         partnerCardTimer.textContent = '00:00:00';
         partnerCardTimer.style.color = 'var(--border-coffee)';
     }
+
+    partnerTimerInterval = setInterval(tickPartnerUI, 1000);
+    tickPartnerUI();
 }
 
 // Clean up stale sessions for a user (e.g. from crashed browser)
@@ -1172,8 +1508,19 @@ function setupStatsToggle() {
     radios.forEach(radio => {
         radio.addEventListener('change', async () => {
             if (radio.value === 'partner' && partnerProfile) {
+                // Re-fetch partner profile from DB to get updated streaks/goals
+                const { data: freshPartner } = await sb
+                    .from('users')
+                    .select('*')
+                    .eq('id', partnerProfile.id)
+                    .maybeSingle();
+                if (freshPartner) {
+                    partnerProfile = freshPartner;
+                }
                 await loadStatsFor(partnerProfile.id, partnerProfile);
             } else {
+                // Re-fetch own profile too for fresh streak data
+                await fetchUserProfile();
                 await loadStatsFor(currentUser.id, userProfile);
             }
         });
@@ -1278,6 +1625,9 @@ async function loadStatsFor(userId, profile) {
 
         const goalTarget = document.getElementById('stat-goal-total');
         if (goalTarget) goalTarget.textContent = profile.daily_goal_hours || 2;
+
+        const ptsEl = document.getElementById('stat-points');
+        if (ptsEl) ptsEl.textContent = profile.total_task_points ?? 0;
     }
 
     // Total hours and session count
@@ -1306,19 +1656,10 @@ async function loadStatsFor(userId, profile) {
         .eq('is_active', false)
         .gte('started_at', todayStart.toISOString());
 
-    if (todaySessions) {
-        const todaySec = todaySessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
-        const todayHrs = (todaySec / 3600).toFixed(2);
-        const goalHrs = profile?.daily_goal_hours || 2;
-        const pct = goalHrs > 0 ? Math.min(Math.round((todayHrs / goalHrs) * 100), 100) : 0;
-
-        const pctEl = document.getElementById('stat-goal-pct');
-        const doneEl = document.getElementById('stat-goal-done');
-        const barEl = document.getElementById('stat-goal-bar');
-
-        if (pctEl) pctEl.textContent = pct;
-        if (doneEl) doneEl.textContent = parseFloat(todayHrs).toFixed(1);
-        if (barEl) barEl.style.width = pct + '%';
+    const todaySec = (todaySessions || []).reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+    updateStatGoalKpi(todaySec, profile?.daily_goal_hours ?? 2);
+    if (currentUser && userId === currentUser.id) {
+        updateFooterProgress(todaySec);
     }
 
     // Heatmap
@@ -1354,52 +1695,386 @@ async function loadStatsFor(userId, profile) {
     // Render subject distribution chart
     await renderSubjectChart(userId);
 
-    // Focus logs
-    const { data: recentSessions } = await sb
-        .from('sessions')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('is_active', false)
-        .order('started_at', { ascending: false })
-        .limit(10);
-
-    focusLogs.innerHTML = '';
-    if (recentSessions && recentSessions.length > 0) {
-        recentSessions.forEach((session, i) => {
-            const item = document.createElement('div');
-            item.className = 'session-item animate-fade-in-up';
-            item.style.animationDelay = `${i * 0.08}s`;
-            const dur = formatDuration(session.duration_seconds);
-            const when = formatSessionDate(session.started_at);
-            item.innerHTML = `
-                <div class="flex items-center gap-4">
-                    <div class="w-11 h-11 rounded-lg flex items-center justify-center" style="background: rgba(230,213,195,0.4); color: var(--mocha);">
-                        <span class="material-symbols-outlined">menu_book</span>
-                    </div>
-                    <div>
-                        <p class="font-bold text-sm" style="color: var(--text-main);">${session.subject}</p>
-                        <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: var(--text-muted);">${when}</p>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <p class="font-bold tabular-nums" style="color: var(--text-main);">${dur}</p>
-                </div>
-            `;
-            focusLogs.appendChild(item);
-        });
-    } else {
-        focusLogs.innerHTML = '<p class="text-center text-sm py-8" style="color: var(--text-muted);">No sessions yet.</p>';
-    }
+    await fetchAndRenderFocusLogs(userId);
 }
 
 // =============================================
-// Draggable To-Do List (localStorage)
+// Calendar tasks (Supabase) + daily to-do widget
 // =============================================
-const TODO_STORAGE_KEY = 'studyloop_todos';
+const TASK_COLORS = [
+    { key: 'mocha' },
+    { key: 'latte' },
+    { key: 'espresso' },
+    { key: 'green' },
+    { key: 'amber' },
+    { key: 'red' },
+];
+
 const TODO_POS_KEY = 'studyloop_todo_pos';
 
+const calendarMonthDisplayed = (() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1, 12, 0, 0, 0);
+})();
+
+let calendarSelectedDateKey = (() => {
+    const n = new Date();
+    const y = n.getFullYear();
+    const mo = String(n.getMonth() + 1).padStart(2, '0');
+    const day = String(n.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${day}`;
+})();
+
+let calendarTasksByDate = {};
+
+function formatLocalDateKey(d) {
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${day}`;
+}
+
+function taskStripeCss(key) {
+    const map = {
+        mocha: 'var(--task-mocha)',
+        latte: 'var(--task-latte)',
+        espresso: 'var(--task-espresso)',
+        green: 'var(--task-green)',
+        amber: 'var(--task-amber)',
+        red: 'var(--task-red)',
+    };
+    return map[key] || map.mocha;
+}
+
+async function adjustUserTaskPoints(delta) {
+    if (!currentUser || !userProfile) return;
+    const cur = Number(userProfile.total_task_points) || 0;
+    const next = Math.max(0, cur + delta);
+    const { error } = await sb.from('users').update({ total_task_points: next }).eq('id', currentUser.id);
+    if (error) {
+        console.warn('Points update failed:', error.message);
+        return;
+    }
+    userProfile.total_task_points = next;
+    const pts = document.getElementById('stat-points');
+    if (pts) pts.textContent = next;
+}
+
+async function insertCalendarTaskForUser(taskDate, title, colorKey) {
+    if (!currentUser || !title.trim()) return null;
+    const ck = TASK_COLORS.some((c) => c.key === colorKey) ? colorKey : 'mocha';
+    const { data, error } = await sb
+        .from('calendar_tasks')
+        .insert({
+            user_id: currentUser.id,
+            task_date: taskDate,
+            title: title.trim(),
+            color_key: ck,
+        })
+        .select()
+        .single();
+    if (error) {
+        console.error('Calendar task insert:', error.message);
+        return null;
+    }
+    return data;
+}
+
+async function deleteCalendarTaskById(id) {
+    if (!currentUser) return;
+    await sb.from('calendar_tasks').delete().eq('id', id).eq('user_id', currentUser.id);
+}
+
+async function setCalendarTaskDone(id, wasDone, nowDone) {
+    if (!currentUser) return;
+    await sb.from('calendar_tasks').update({ done: nowDone }).eq('id', id).eq('user_id', currentUser.id);
+    if (nowDone && !wasDone) await adjustUserTaskPoints(10);
+    if (!nowDone && wasDone) await adjustUserTaskPoints(-10);
+}
+
+async function loadCalendarMonthTasks() {
+    if (!currentUser) return;
+    const y = calendarMonthDisplayed.getFullYear();
+    const m = calendarMonthDisplayed.getMonth();
+    const startKey = formatLocalDateKey(new Date(y, m, 1));
+    const endKey = formatLocalDateKey(new Date(y, m + 1, 0));
+    const { data, error } = await sb
+        .from('calendar_tasks')
+        .select('id,task_date,title,color_key,done,created_at')
+        .eq('user_id', currentUser.id)
+        .gte('task_date', startKey)
+        .lte('task_date', endKey)
+        .order('created_at', { ascending: true });
+    if (error) {
+        console.warn('Calendar load:', error.message);
+        calendarTasksByDate = {};
+        return;
+    }
+    calendarTasksByDate = {};
+    (data || []).forEach((t) => {
+        const k = t.task_date;
+        if (!calendarTasksByDate[k]) calendarTasksByDate[k] = [];
+        calendarTasksByDate[k].push(t);
+    });
+}
+
+function renderCalendarGrid() {
+    const grid = document.getElementById('cal-grid');
+    const titleEl = document.getElementById('cal-month-title');
+    if (!grid || !titleEl) return;
+    const y = calendarMonthDisplayed.getFullYear();
+    const m = calendarMonthDisplayed.getMonth();
+    titleEl.textContent = calendarMonthDisplayed.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    const first = new Date(y, m, 1);
+    const gridStart = new Date(first);
+    gridStart.setDate(first.getDate() - first.getDay());
+
+    grid.innerHTML = '';
+    const todayKey = formatLocalDateKey(new Date());
+
+    for (let i = 0; i < 42; i++) {
+        const cellDate = new Date(gridStart);
+        cellDate.setDate(gridStart.getDate() + i);
+        const key = formatLocalDateKey(cellDate);
+        const inMonth = cellDate.getMonth() === m;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cal-cell';
+        if (!inMonth) btn.classList.add('other-month');
+        if (key === todayKey) btn.classList.add('today');
+        if (key === calendarSelectedDateKey) btn.classList.add('selected');
+
+        const num = document.createElement('span');
+        num.className = 'cal-cell-num';
+        num.textContent = String(cellDate.getDate());
+        btn.appendChild(num);
+
+        const tasks = calendarTasksByDate[key] || [];
+        if (tasks.length) {
+            const dots = document.createElement('div');
+            dots.className = 'cal-cell-dots';
+            const palette = [...new Set(tasks.map((t) => t.color_key))];
+            const show = palette.slice(0, 3);
+            show.forEach((ck) => {
+                const dot = document.createElement('span');
+                dot.className = 'cal-dot';
+                dot.style.background = taskStripeCss(ck);
+                dots.appendChild(dot);
+            });
+            if (palette.length > 3) {
+                const more = document.createElement('span');
+                more.className = 'cal-more';
+                more.textContent = `+${palette.length - 3}`;
+                dots.appendChild(more);
+            }
+            btn.appendChild(dots);
+        }
+
+        btn.addEventListener('click', () => {
+            calendarSelectedDateKey = key;
+            renderCalendarGrid();
+            renderCalendarDayPanel();
+        });
+        grid.appendChild(btn);
+    }
+}
+
+function renderCalendarDayPanel() {
+    const panelTasks = document.getElementById('cal-day-tasks');
+    const titleEl = document.getElementById('cal-day-title');
+    if (!panelTasks || !titleEl) return;
+    const parts = calendarSelectedDateKey.split('-').map(Number);
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    titleEl.textContent = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+    panelTasks.innerHTML = '';
+    const tasks = calendarTasksByDate[calendarSelectedDateKey] || [];
+    if (tasks.length === 0) {
+        panelTasks.innerHTML = '<p class="text-xs py-2 text-center font-body" style="color: var(--text-muted);">No tasks</p>';
+        return;
+    }
+    tasks.forEach((t) => {
+        const row = document.createElement('div');
+        row.className = `cal-task-row${t.done ? ' done' : ''}`;
+        row.innerHTML = `
+            <span class="cal-task-stripe" style="background: ${taskStripeCss(t.color_key)}"></span>
+            <label class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                <input type="checkbox" class="todo-checkbox" ${t.done ? 'checked' : ''} />
+                <span class="todo-text">${escapeHtml(t.title)}</span>
+            </label>
+            <button type="button" class="todo-delete cal-task-del" title="Delete"><span class="material-symbols-outlined text-sm">close</span></button>
+        `;
+        row.querySelector('input').addEventListener('change', async (e) => {
+            const now = e.target.checked;
+            const was = t.done;
+            t.done = now;
+            await setCalendarTaskDone(t.id, was, now);
+            await loadCalendarMonthTasks();
+            renderCalendarGrid();
+            renderCalendarDayPanel();
+            syncTodayTodoList();
+        });
+        row.querySelector('.cal-task-del').addEventListener('click', async () => {
+            if (t.done) await adjustUserTaskPoints(-10);
+            await deleteCalendarTaskById(t.id);
+            await loadCalendarMonthTasks();
+            renderCalendarGrid();
+            renderCalendarDayPanel();
+            syncTodayTodoList();
+        });
+        panelTasks.appendChild(row);
+    });
+}
+
+async function renderCalendarView() {
+    await loadCalendarMonthTasks();
+    renderCalendarGrid();
+    renderCalendarDayPanel();
+}
+
+function setupCalendar() {
+    const prev = document.getElementById('cal-prev-month');
+    const next = document.getElementById('cal-next-month');
+    const form = document.getElementById('cal-add-form');
+    const colorRow = document.getElementById('cal-add-colors');
+
+    if (prev && !prev.dataset.bound) {
+        prev.dataset.bound = '1';
+        prev.addEventListener('click', async () => {
+            calendarMonthDisplayed.setMonth(calendarMonthDisplayed.getMonth() - 1);
+            await renderCalendarView();
+        });
+    }
+    if (next && !next.dataset.bound) {
+        next.dataset.bound = '1';
+        next.addEventListener('click', async () => {
+            calendarMonthDisplayed.setMonth(calendarMonthDisplayed.getMonth() + 1);
+            await renderCalendarView();
+        });
+    }
+
+    if (colorRow && !colorRow.dataset.bound) {
+        colorRow.dataset.bound = '1';
+        colorRow.dataset.selected = 'mocha';
+        TASK_COLORS.forEach((c) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = `cal-task-color-opt${c.key === 'mocha' ? ' active' : ''}`;
+            b.style.background = taskStripeCss(c.key);
+            b.title = c.key;
+            b.addEventListener('click', () => {
+                colorRow.querySelectorAll('.cal-task-color-opt').forEach((x) => x.classList.remove('active'));
+                b.classList.add('active');
+                colorRow.dataset.selected = c.key;
+            });
+            colorRow.appendChild(b);
+        });
+    }
+
+    if (form && !form.dataset.bound) {
+        form.dataset.bound = '1';
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) return;
+            const input = document.getElementById('cal-add-input');
+            const text = input?.value.trim() || '';
+            if (!text) return;
+            const colors = document.getElementById('cal-add-colors');
+            const ck = colors?.dataset.selected || 'mocha';
+            await insertCalendarTaskForUser(calendarSelectedDateKey, text, ck);
+            if (input) input.value = '';
+            await renderCalendarView();
+            syncTodayTodoList();
+        });
+    }
+}
+
+function subscribeCalendarTasksRealtime() {
+    if (!currentUser) return;
+    if (calendarRealtimeChannel) {
+        sb.removeChannel(calendarRealtimeChannel);
+        calendarRealtimeChannel = null;
+    }
+    calendarRealtimeChannel = sb
+        .channel('self-calendar-tasks')
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'calendar_tasks', filter: `user_id=eq.${currentUser.id}` },
+            () => {
+                syncTodayTodoList();
+                const cal = document.getElementById('calendar-view');
+                if (cal && !cal.classList.contains('hidden')) renderCalendarView();
+            }
+        )
+        .subscribe();
+}
+
+async function syncTodayTodoList() {
+    if (!currentUser) return;
+    const todayKey = formatLocalDateKey(new Date());
+    lastTodoDateKey = todayKey;
+    const list = document.getElementById('todo-list');
+    if (!list) return;
+    const { data, error } = await sb
+        .from('calendar_tasks')
+        .select('id,title,color_key,done')
+        .eq('user_id', currentUser.id)
+        .eq('task_date', todayKey)
+        .order('created_at', { ascending: true });
+    if (error) {
+        list.innerHTML = `<p class="text-center text-xs py-3 font-body" style="color: var(--accent-red);">Could not load tasks</p>`;
+        return;
+    }
+    list.innerHTML = '';
+    const todos = data || [];
+    if (todos.length === 0) {
+        list.innerHTML = '<p class="text-center text-xs py-3 font-body" style="color: var(--text-muted);">No tasks for today — add below or in Calendar.</p>';
+        return;
+    }
+    todos.forEach((todo) => {
+        const item = document.createElement('div');
+        item.className = `todo-item${todo.done ? ' done' : ''}`;
+        item.innerHTML = `
+            <span class="todo-color-stripe" style="background: ${taskStripeCss(todo.color_key)}"></span>
+            <label class="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
+                <input type="checkbox" class="todo-checkbox" ${todo.done ? 'checked' : ''} />
+                <span class="todo-text">${escapeHtml(todo.title)}</span>
+            </label>
+            <button type="button" class="todo-delete" title="Remove"><span class="material-symbols-outlined text-sm">close</span></button>
+        `;
+        item.querySelector('.todo-checkbox').addEventListener('change', async (e) => {
+            const now = e.target.checked;
+            const was = todo.done;
+            await setCalendarTaskDone(todo.id, was, now);
+            todo.done = now;
+            await syncTodayTodoList();
+            const cal = document.getElementById('calendar-view');
+            if (cal && !cal.classList.contains('hidden')) {
+                await loadCalendarMonthTasks();
+                renderCalendarGrid();
+                renderCalendarDayPanel();
+            }
+        });
+        item.querySelector('.todo-delete').addEventListener('click', async () => {
+            if (todo.done) await adjustUserTaskPoints(-10);
+            await deleteCalendarTaskById(todo.id);
+            await syncTodayTodoList();
+            const cal = document.getElementById('calendar-view');
+            if (cal && !cal.classList.contains('hidden')) {
+                await loadCalendarMonthTasks();
+                renderCalendarGrid();
+                renderCalendarDayPanel();
+            }
+        });
+        list.appendChild(item);
+    });
+}
+
+// =============================================
+// Draggable To-Do widget (today’s calendar tasks)
+// =============================================
 function setupTodo() {
-    // Create the floating todo widget
     const widget = document.createElement('div');
     widget.id = 'todo-widget';
     widget.innerHTML = `
@@ -1408,14 +2083,16 @@ function setupTodo() {
                 <span class="material-symbols-outlined text-lg" style="color: var(--mocha);">checklist</span>
                 <span class="text-[10px] font-extrabold uppercase tracking-[0.15em]" style="color: var(--text-main);">To-Do</span>
             </div>
-            <button id="todo-minimize" class="w-6 h-6 flex items-center justify-center rounded-full" style="color: var(--text-muted);">
+            <button type="button" id="todo-minimize" class="w-6 h-6 flex items-center justify-center rounded-full" style="color: var(--text-muted);">
                 <span class="material-symbols-outlined text-sm">remove</span>
             </button>
         </div>
         <div id="todo-body">
+            <p id="todo-date-hint" class="text-[9px] font-bold uppercase tracking-wider mb-1 font-body" style="color: var(--text-muted);"></p>
             <div id="todo-list"></div>
+            <div id="todo-color-row" class="flex gap-1.5 flex-wrap mt-2"></div>
             <form id="todo-form" class="flex gap-2 mt-2">
-                <input type="text" id="todo-input" placeholder="Add a task..." class="todo-input" />
+                <input type="text" id="todo-input" placeholder="Add for today..." class="todo-input" />
                 <button type="submit" class="todo-add-btn">
                     <span class="material-symbols-outlined text-sm">add</span>
                 </button>
@@ -1424,7 +2101,6 @@ function setupTodo() {
     `;
     document.body.appendChild(widget);
 
-    // Load position
     const savedPos = JSON.parse(localStorage.getItem(TODO_POS_KEY) || 'null');
     if (savedPos) {
         widget.style.left = savedPos.x + 'px';
@@ -1433,10 +2109,8 @@ function setupTodo() {
         widget.style.bottom = 'auto';
     }
 
-    // Make draggable
     makeDraggable(widget, widget.querySelector('#todo-header'));
 
-    // Minimize toggle
     const todoBody = widget.querySelector('#todo-body');
     let minimized = false;
     widget.querySelector('#todo-minimize').addEventListener('click', () => {
@@ -1445,72 +2119,49 @@ function setupTodo() {
         widget.querySelector('#todo-minimize .material-symbols-outlined').textContent = minimized ? 'add' : 'remove';
     });
 
-    // Load todos
-    renderTodos();
+    const colorRow = widget.querySelector('#todo-color-row');
+    let todoWidgetColor = 'mocha';
+    TASK_COLORS.forEach((c) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = `cal-task-color-opt${c.key === 'mocha' ? ' active' : ''}`;
+        b.style.background = taskStripeCss(c.key);
+        b.title = c.key;
+        b.addEventListener('click', () => {
+            colorRow.querySelectorAll('.cal-task-color-opt').forEach((x) => x.classList.remove('active'));
+            b.classList.add('active');
+            todoWidgetColor = c.key;
+        });
+        colorRow.appendChild(b);
+    });
 
-    // Add todo
-    widget.querySelector('#todo-form').addEventListener('submit', (e) => {
+    function updateTodoDateHint() {
+        const h = widget.querySelector('#todo-date-hint');
+        if (h) h.textContent = `Today · ${formatLocalDateKey(new Date())}`;
+    }
+    updateTodoDateHint();
+    syncTodayTodoList();
+
+    clearInterval(todoDateCheckIntervalId);
+    todoDateCheckIntervalId = setInterval(() => {
+        const k = formatLocalDateKey(new Date());
+        if (k !== lastTodoDateKey) {
+            updateTodoDateHint();
+            syncTodayTodoList();
+        }
+    }, 30000);
+
+    widget.querySelector('#todo-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!currentUser) return;
         const input = widget.querySelector('#todo-input');
         const text = input.value.trim();
         if (!text) return;
-        const todos = getTodos();
-        todos.push({ id: Date.now(), text, done: false });
-        saveTodos(todos);
-        renderTodos();
+        await insertCalendarTaskForUser(formatLocalDateKey(new Date()), text, todoWidgetColor);
         input.value = '';
-    });
-}
-
-function getTodos() {
-    return JSON.parse(localStorage.getItem(TODO_STORAGE_KEY) || '[]');
-}
-
-function saveTodos(todos) {
-    localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos));
-}
-
-function renderTodos() {
-    const list = document.getElementById('todo-list');
-    if (!list) return;
-    const todos = getTodos();
-    list.innerHTML = '';
-
-    if (todos.length === 0) {
-        list.innerHTML = '<p class="text-center text-xs py-3" style="color: var(--text-muted);">No tasks yet!</p>';
-        return;
-    }
-
-    todos.forEach(todo => {
-        const item = document.createElement('div');
-        item.className = `todo-item ${todo.done ? 'done' : ''}`;
-        item.innerHTML = `
-            <label class="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
-                <input type="checkbox" class="todo-checkbox" ${todo.done ? 'checked' : ''} />
-                <span class="todo-text">${escapeHtml(todo.text)}</span>
-            </label>
-            <button class="todo-delete" title="Remove">
-                <span class="material-symbols-outlined text-sm">close</span>
-            </button>
-        `;
-
-        // Toggle done
-        item.querySelector('.todo-checkbox').addEventListener('change', (e) => {
-            const todos = getTodos();
-            const t = todos.find(t => t.id === todo.id);
-            if (t) t.done = e.target.checked;
-            saveTodos(todos);
-            renderTodos();
-        });
-
-        // Delete
-        item.querySelector('.todo-delete').addEventListener('click', () => {
-            const todos = getTodos().filter(t => t.id !== todo.id);
-            saveTodos(todos);
-            renderTodos();
-        });
-
-        list.appendChild(item);
+        await syncTodayTodoList();
+        const cal = document.getElementById('calendar-view');
+        if (cal && !cal.classList.contains('hidden')) await renderCalendarView();
     });
 }
 
