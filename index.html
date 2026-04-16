@@ -449,6 +449,22 @@
                                 +10 per task done
                             </div>
                         </div>
+                        <!-- Exam Countdown -->
+                        <div class="card-elevated p-6 stats-card-host">
+                            <div id="stats-load-kpi-exam" class="stat-card-loading hidden" aria-hidden="true">
+                                <div class="loading-ring loading-ring--sm" role="presentation"></div>
+                            </div>
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="material-symbols-outlined text-lg"
+                                    style="color: var(--accent-amber);">hourglass_bottom</span>
+                                <span class="text-[10px] font-extrabold uppercase tracking-widest font-body"
+                                    style="color: var(--text-muted);">Next Exam</span>
+                            </div>
+                            <p id="exam-countdown-main" class="text-xl font-extrabold tabular-nums"
+                                style="color: var(--text-main);">No exam set</p>
+                            <p id="exam-countdown-sub" class="text-xs font-body mt-1"
+                                style="color: var(--text-muted);">Add a date in Settings.</p>
+                        </div>
                     </div>
 
                     <!-- Charts Row -->
@@ -777,6 +793,30 @@
                             <button type="button" id="save-daily-goal" class="settings-save-btn settings-goal-save" title="Save Goal">
                                 <span class="material-symbols-outlined text-sm">check</span>
                                 <span class="text-[10px] font-bold uppercase tracking-wider">Save</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Exam Countdown Section -->
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <span class="material-symbols-outlined text-base" style="color: var(--mocha);">event</span>
+                        <span class="text-[10px] font-extrabold uppercase tracking-[0.15em]" style="color: var(--text-main);">Next Exam</span>
+                    </div>
+                    <div class="mt-4 flex flex-col gap-3">
+                        <div class="flex flex-col gap-1.5">
+                            <label class="settings-label" for="settings-exam-date">Exam date</label>
+                            <input type="date" id="settings-exam-date" class="settings-input w-full" />
+                        </div>
+                        <div class="flex flex-col gap-1.5">
+                            <label class="settings-label" for="settings-exam-label">Label (optional)</label>
+                            <input type="text" id="settings-exam-label" class="settings-input w-full"
+                                   placeholder="e.g. Calculus final" />
+                        </div>
+                        <div class="flex justify-end">
+                            <button id="save-exam" class="settings-save-btn" title="Save exam">
+                                <span class="material-symbols-outlined text-sm">check</span>
                             </button>
                         </div>
                     </div>

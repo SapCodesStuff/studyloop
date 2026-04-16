@@ -338,6 +338,42 @@ async function fetchUserProfile() {
     }
 }
 
+function renderExamCountdown(profile) {
+    const main = document.getElementById('exam-countdown-main');
+    const sub = document.getElementById('exam-countdown-sub');
+    if (!main || !sub) return;
+
+    if (!profile || !profile.exam_date) {
+        main.textContent = 'No exam set';
+        sub.textContent = 'Add a date in Settings.';
+        return;
+    }
+
+    const today = new Date();
+    const exam = new Date(profile.exam_date);
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const end = new Date(exam.getFullYear(), exam.getMonth(), exam.getDate());
+    const diffMs = end - start;
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+    const label = profile.exam_label || 'Exam';
+
+    if (diffDays > 1) {
+        main.textContent = `${diffDays} days`;
+        sub.textContent = `${label} on ${exam.toLocaleDateString()}`;
+    } else if (diffDays === 1) {
+        main.textContent = 'Tomorrow';
+        sub.textContent = `${label} on ${exam.toLocaleDateString()}`;
+    } else if (diffDays === 0) {
+        main.textContent = 'Today';
+        sub.textContent = `${label} is today (${exam.toLocaleDateString()})`;
+    } else {
+        const daysAgo = Math.abs(diffDays);
+        main.textContent = 'Done';
+        sub.textContent = `${label} was ${daysAgo} day${daysAgo === 1 ? '' : 's'} ago (${exam.toLocaleDateString()})`;
+    }
+}
+
 // =============================================
 // Load Real Data
 // =============================================
@@ -466,6 +502,9 @@ async function loadChatHistory() {
 async function loadStats() {
     if (!currentUser) return;
     await loadStatsFor(currentUser.id, userProfile);
+    if (userProfile) {
+        renderExamCountdown(userProfile);
+    }
 }
 
 // =============================================
@@ -582,6 +621,21 @@ function openSettingsModal() {
         const goalVal = userProfile.daily_goal_hours || 2;
         $('#settings-goal-value').textContent = goalVal;
         $('#settings-goal-value').dataset.value = goalVal;
+
+        const examDateInput = document.getElementById('settings-exam-date');
+        const examLabelInput = document.getElementById('settings-exam-label');
+        if (examDateInput && examLabelInput) {
+            if (userProfile.exam_date) {
+                const d = new Date(userProfile.exam_date);
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                examDateInput.value = `${y}-${m}-${day}`;
+            } else {
+                examDateInput.value = '';
+            }
+            examLabelInput.value = userProfile.exam_label || '';
+        }
     }
 
     const darkToggle = document.getElementById('settings-dark-mode');
@@ -636,6 +690,42 @@ function setupSettings() {
     const darkModeToggle = document.getElementById('settings-dark-mode');
     if (darkModeToggle) {
         darkModeToggle.addEventListener('change', () => applyTheme(darkModeToggle.checked));
+    }
+
+    // ---- Save Exam ----
+    const saveExamBtn = document.getElementById('save-exam');
+    if (saveExamBtn) {
+        saveExamBtn.addEventListener('click', async () => {
+            if (!currentUser) return;
+            const examDateInput = document.getElementById('settings-exam-date');
+            const examLabelInput = document.getElementById('settings-exam-label');
+            const dateVal = examDateInput?.value || null;
+            const labelVal = (examLabelInput?.value || '').trim();
+
+            saveExamBtn.disabled = true;
+            const updatePayload = {
+                exam_date: dateVal || null,
+                exam_label: labelVal || null,
+            };
+
+            const { error } = await sb
+                .from('users')
+                .update(updatePayload)
+                .eq('id', currentUser.id);
+
+            if (error) {
+                showSettingsStatus('Failed to update exam: ' + error.message, true);
+            } else {
+                if (userProfile) {
+                    userProfile.exam_date = dateVal || null;
+                    userProfile.exam_label = labelVal || null;
+                    renderExamCountdown(userProfile);
+                }
+                flashSaveBtn(saveExamBtn);
+                showSettingsStatus('Exam updated!');
+            }
+            saveExamBtn.disabled = false;
+        });
     }
 
     // ---- Save Display Name ----
@@ -2002,6 +2092,10 @@ async function loadStatsFor(userId, profile) {
 
         const ptsEl = document.getElementById('stat-points');
         if (ptsEl) ptsEl.textContent = profile.total_task_points ?? 0;
+        const isMe = currentUser && userId === currentUser.id;
+        if (isMe) {
+            renderExamCountdown(profile);
+        }
     }
     hideStatsSectionLoader('stats-load-kpi-streak');
     hideStatsSectionLoader('stats-load-kpi-points');
