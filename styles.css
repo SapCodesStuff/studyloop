@@ -668,6 +668,59 @@ h6 {
     }
 }
 
+/* ---- Narrow phones (<= 475px): prevent calendar overflow ---- */
+@media (max-width: 475px) {
+    #calendar-view {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        overflow-x: hidden !important;
+    }
+
+    #calendar-view .max-w-5xl,
+    #calendar-view .card-elevated,
+    #calendar-view .cal-day-panel,
+    #calendar-view #cal-grid,
+    #calendar-view #cal-day-tasks,
+    #calendar-view #cal-add-form,
+    #calendar-view #cal-session-form {
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+
+    #calendar-view .cal-month-nav {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    #calendar-view #cal-month-title {
+        order: -1;
+        width: 100%;
+        text-align: center;
+        margin-bottom: 0.2rem;
+    }
+
+    #calendar-view .cal-grid {
+        gap: 4px;
+    }
+
+    #calendar-view .cal-cell {
+        padding: 3px 1px;
+    }
+
+    #calendar-view .cal-cell-num {
+        font-size: 10px;
+    }
+
+    #calendar-view #cal-session-form .grid.grid-cols-2 {
+        grid-template-columns: 1fr !important;
+    }
+
+    #calendar-view #cal-add-form,
+    #calendar-view #cal-session-form {
+        overflow: hidden;
+    }
+}
+
 .stats-kpi-badge {
     display: inline-block;
     font-size: 10px;
@@ -1734,6 +1787,55 @@ h6 {
     opacity: 0.65;
 }
 
+.cal-study-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 0.65rem;
+}
+
+.cal-study-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-recess);
+    box-shadow: var(--neo-pressed);
+}
+
+.cal-study-row__subject {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-main);
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cal-study-row__meta {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: right;
+    flex: 0 1 58%;
+}
+
+.cal-cell-study-pill {
+    margin-top: 3px;
+    font-size: 7px;
+    font-weight: 800;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--mocha) 16%, transparent);
+    color: var(--mocha);
+}
+
 .cal-task-stripe {
     width: 4px;
     align-self: stretch;
@@ -2228,6 +2330,21 @@ h6 {
     /* ---- Chat Panel: Mobile ---- */
     #chat-panel {
         border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        z-index: 80 !important;
+        inset: 0 !important;
+        height: 100dvh;
+        max-height: 100dvh;
+    }
+
+    #chat-panel .chat-shell__messages {
+        min-height: 0;
+    }
+
+    #chat-panel .chat-shell__footer {
+        padding-bottom: calc(0.85rem + env(safe-area-inset-bottom, 0px));
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
     }
 
     /* ---- Stats / Calendar: Mobile ---- */
@@ -2235,6 +2352,45 @@ h6 {
     #calendar-view {
         padding: 1.25rem 1rem !important;
         padding-bottom: 80px !important;
+        overflow-x: hidden;
+    }
+
+    #calendar-view .max-w-5xl {
+        min-width: 0;
+    }
+
+    #calendar-view .grid.grid-cols-1.xl\:grid-cols-3 {
+        min-width: 0;
+    }
+
+    .cal-month-nav {
+        gap: 0.55rem;
+        flex-wrap: nowrap;
+    }
+
+    #cal-month-title {
+        min-width: 0 !important;
+        flex: 1 1 auto;
+        font-size: 1rem;
+        line-height: 1.2;
+    }
+
+    #calendar-view .cal-day-panel {
+        min-width: 0;
+    }
+
+    #calendar-view .cal-study-row {
+        gap: 0.45rem;
+    }
+
+    #calendar-view .cal-study-row__subject {
+        flex: 1 1 42%;
+        min-width: 0;
+    }
+
+    #calendar-view .cal-study-row__meta {
+        flex: 1 1 58%;
+        font-size: 0.58rem;
     }
 
     #stats-view > div {

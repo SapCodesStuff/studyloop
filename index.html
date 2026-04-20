@@ -632,6 +632,27 @@
                         <div class="cal-day-panel flex flex-col gap-3 min-h-[200px]" id="cal-day-panel">
                             <h3 id="cal-day-title" class="font-bold text-base" style="color: var(--text-main);">—</h3>
                             <div id="cal-day-tasks" class="flex-1 min-h-[100px] max-h-[280px] overflow-y-auto"></div>
+                            <form id="cal-session-form" class="flex flex-col gap-2 mt-1">
+                                <label class="text-[10px] font-bold uppercase tracking-widest"
+                                    style="color: var(--text-muted);">Add study session</label>
+                                <input type="text" id="cal-session-subject" class="pill-input px-4 py-2.5 text-sm"
+                                    maxlength="120" placeholder="Subject (optional)" />
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div class="flex flex-col gap-1">
+                                        <label for="cal-session-start" class="text-[10px] font-bold uppercase tracking-wider"
+                                            style="color: var(--text-muted);">Start time</label>
+                                        <input type="time" id="cal-session-start" class="pill-input px-4 py-2.5 text-sm" required />
+                                    </div>
+                                    <div class="flex flex-col gap-1">
+                                        <label for="cal-session-end" class="text-[10px] font-bold uppercase tracking-wider"
+                                            style="color: var(--text-muted);">End time</label>
+                                        <input type="time" id="cal-session-end" class="pill-input px-4 py-2.5 text-sm" required />
+                                    </div>
+                                </div>
+                                <p id="cal-session-status" class="text-[10px] font-body hidden" style="color: var(--text-muted);"></p>
+                                <button type="submit" class="pill-btn pill-btn-primary py-2.5 text-xs w-full">Add study
+                                    time</button>
+                            </form>
                             <form id="cal-add-form" class="flex flex-col gap-2 mt-1">
                                 <label class="text-[10px] font-bold uppercase tracking-widest"
                                     style="color: var(--text-muted);">Add task</label>

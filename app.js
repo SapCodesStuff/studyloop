@@ -118,6 +118,7 @@ let appPresenceIntervalId = null;
 let partnerProfilePollIntervalId = null;
 let currentSessionId = null;
 let calendarRealtimeChannel = null;
+let chatRealtimeChannel = null;
 let lastTodoDateKey = null;
 let todoDateCheckIntervalId = null;
 let focusLogsExpanded = false;
@@ -471,30 +472,37 @@ async function loadChatHistory() {
     const { data, error } = await sb
         .from('messages')
         .select('*, sender:users(display_name)')
-        .order('created_at', { ascending: true })
+        // Fetch newest first, then render oldest->newest for natural chat order.
+        .order('created_at', { ascending: false })
         .limit(50);
 
     if (!error && data && data.length > 0) {
-        data.forEach(msg => {
+        [...data].reverse().forEach(msg => {
             const isOutgoing = msg.sender_id === currentUser.id;
             const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            addChatMessage(msg.content, isOutgoing, time);
+            addChatMessage(msg.content, isOutgoing, time, msg.id);
         });
     } else {
         chatMessages.innerHTML = '<p class="chat-empty-hint">No messages yet — say hello to your study buddy.</p>';
     }
 
     // Subscribe to new messages in real time
-    sb
+    if (chatRealtimeChannel) {
+        try { await sb.removeChannel(chatRealtimeChannel); } catch { /* no-op */ }
+        chatRealtimeChannel = null;
+    }
+    chatRealtimeChannel = sb
         .channel('messages')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
             const msg = payload.new;
-            if (msg.sender_id === currentUser.id) return; // We already added our own
+
             // Clear the "no messages" placeholder if present
             const placeholder = chatMessages.querySelector('p');
             if (placeholder && chatMessages.children.length === 1) chatMessages.innerHTML = '';
+
+            const isOutgoing = currentUser && msg.sender_id === currentUser.id;
             const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            addChatMessage(msg.content, false, time);
+            addChatMessage(msg.content, isOutgoing, time, msg.id);
         })
         .subscribe();
 }
@@ -1338,7 +1346,7 @@ function setupChat() {
         if (!text || !currentUser) return;
 
         // Add to UI immediately
-        addChatMessage(text, true);
+        const el = addChatMessage(text, true);
         chatInput.value = '';
 
         // Clear placeholder if exists
@@ -1348,16 +1356,30 @@ function setupChat() {
         }
 
         // Insert into Supabase
-        await sb.from('messages').insert({
+        const { data, error } = await sb.from('messages').insert({
             sender_id: currentUser.id,
             content: text,
-        });
+        }).select('id, created_at').single();
+
+        if (!error && data && el) {
+            el.dataset.msgId = data.id;
+            const tsEl = el.querySelector('.chat-msg__time');
+            if (tsEl) {
+                tsEl.textContent = new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+        }
     });
 }
 
-function addChatMessage(text, isOutgoing, time) {
+function addChatMessage(text, isOutgoing, time, msgId) {
+    if (msgId) {
+        const existing = chatMessages.querySelector(`[data-msg-id="${msgId}"]`);
+        if (existing) return existing;
+    }
+
     const wrapper = document.createElement('div');
     wrapper.className = `chat-msg ${isOutgoing ? 'chat-msg--out' : 'chat-msg--in'} flex flex-col animate-fade-in`;
+    if (msgId) wrapper.dataset.msgId = msgId;
 
     const bubble = document.createElement('div');
     bubble.className = `chat-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`;
@@ -1371,6 +1393,7 @@ function addChatMessage(text, isOutgoing, time) {
     wrapper.appendChild(ts);
     chatMessages.appendChild(wrapper);
     chatMessages.scrollTop = chatMessages.scrollHeight;
+    return wrapper;
 }
 
 // =============================================
@@ -2200,6 +2223,7 @@ let calendarSelectedDateKey = (() => {
 })();
 
 let calendarTasksByDate = {};
+let calendarSessionsByDate = {};
 
 function formatLocalDateKey(d) {
     const y = d.getFullYear();
@@ -2295,6 +2319,79 @@ async function loadCalendarMonthTasks() {
     });
 }
 
+async function loadCalendarMonthSessions() {
+    if (!currentUser) return;
+    const y = calendarMonthDisplayed.getFullYear();
+    const m = calendarMonthDisplayed.getMonth();
+    const startLocal = new Date(y, m, 1, 0, 0, 0, 0);
+    const endLocalExclusive = new Date(y, m + 1, 1, 0, 0, 0, 0);
+    const { data, error } = await sb
+        .from('sessions')
+        .select('id,subject,started_at,ended_at,duration_seconds')
+        .eq('user_id', currentUser.id)
+        .eq('is_active', false)
+        .gte('started_at', startLocal.toISOString())
+        .lt('started_at', endLocalExclusive.toISOString())
+        .order('started_at', { ascending: true });
+    if (error) {
+        console.warn('Calendar sessions load:', error.message);
+        calendarSessionsByDate = {};
+        return;
+    }
+    calendarSessionsByDate = {};
+    (data || []).forEach((s) => {
+        const key = formatLocalDateKey(new Date(s.started_at));
+        if (!calendarSessionsByDate[key]) calendarSessionsByDate[key] = [];
+        calendarSessionsByDate[key].push(s);
+    });
+}
+
+function parseTimeToMinutes(value) {
+    if (!/^\d{2}:\d{2}$/.test(value || '')) return null;
+    const [hh, mm] = value.split(':').map(Number);
+    if (!Number.isInteger(hh) || !Number.isInteger(mm)) return null;
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+    return hh * 60 + mm;
+}
+
+function localDateTimeIso(dateKey, timeValue) {
+    const [y, m, d] = dateKey.split('-').map(Number);
+    const [hh, mm] = timeValue.split(':').map(Number);
+    return new Date(y, m - 1, d, hh, mm, 0, 0).toISOString();
+}
+
+async function insertManualSessionForUser(dateKey, subject, startTime, endTime) {
+    if (!currentUser) {
+        return { ok: false, message: 'Please log in again.' };
+    }
+    const startMin = parseTimeToMinutes(startTime);
+    const endMin = parseTimeToMinutes(endTime);
+    if (startMin === null || endMin === null) {
+        return { ok: false, message: 'Enter valid start and end times.' };
+    }
+    if (endMin <= startMin) {
+        return { ok: false, message: 'End time must be after start time.' };
+    }
+    const safeSubject = (subject || '').trim() || 'Manual session';
+    const durationSeconds = (endMin - startMin) * 60;
+    const startedAt = localDateTimeIso(dateKey, startTime);
+    const endedAt = localDateTimeIso(dateKey, endTime);
+    const { error } = await sb.from('sessions').insert({
+        user_id: currentUser.id,
+        subject: safeSubject,
+        started_at: startedAt,
+        ended_at: endedAt,
+        duration_seconds: durationSeconds,
+        is_active: false,
+        last_heartbeat_at: endedAt,
+    });
+    if (error) {
+        console.error('Manual session insert:', error.message);
+        return { ok: false, message: 'Could not save that session.' };
+    }
+    return { ok: true, message: 'Study session added.' };
+}
+
 function renderCalendarGrid() {
     const grid = document.getElementById('cal-grid');
     const titleEl = document.getElementById('cal-month-title');
@@ -2328,6 +2425,7 @@ function renderCalendarGrid() {
         btn.appendChild(num);
 
         const tasks = calendarTasksByDate[key] || [];
+        const sessions = calendarSessionsByDate[key] || [];
         if (tasks.length) {
             const dots = document.createElement('div');
             dots.className = 'cal-cell-dots';
@@ -2346,6 +2444,13 @@ function renderCalendarGrid() {
                 dots.appendChild(more);
             }
             btn.appendChild(dots);
+        }
+        if (sessions.length) {
+            const totalMin = Math.round(sessions.reduce((sum, s) => sum + ((Number(s.duration_seconds) || 0) / 60), 0));
+            const studyPill = document.createElement('span');
+            studyPill.className = 'cal-cell-study-pill';
+            studyPill.textContent = `${totalMin}m`;
+            btn.appendChild(studyPill);
         }
 
         btn.addEventListener('click', () => {
@@ -2366,9 +2471,33 @@ function renderCalendarDayPanel() {
     titleEl.textContent = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
     panelTasks.innerHTML = '';
+    const sessions = [...(calendarSessionsByDate[calendarSelectedDateKey] || [])]
+        .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+    if (sessions.length) {
+        const studyList = document.createElement('div');
+        studyList.className = 'cal-study-list';
+        sessions.forEach((s) => {
+            const row = document.createElement('div');
+            row.className = 'cal-study-row';
+            const start = new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const end = s.ended_at
+                ? new Date(s.ended_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : '--:--';
+            row.innerHTML = `
+                <span class="cal-study-row__subject">${escapeHtml(s.subject || 'Manual session')}</span>
+                <span class="cal-study-row__meta">${start} - ${end} (${formatDuration(s.duration_seconds || 0)})</span>
+            `;
+            studyList.appendChild(row);
+        });
+        panelTasks.appendChild(studyList);
+    }
     const tasks = calendarTasksByDate[calendarSelectedDateKey] || [];
     if (tasks.length === 0) {
-        panelTasks.innerHTML = '<p class="text-xs py-2 text-center font-body" style="color: var(--text-muted);">No tasks</p>';
+        const empty = document.createElement('p');
+        empty.className = 'text-xs py-2 text-center font-body';
+        empty.style.color = 'var(--text-muted)';
+        empty.textContent = sessions.length ? 'No tasks' : 'No tasks or study sessions';
+        panelTasks.appendChild(empty);
         return;
     }
     tasks.forEach((t) => {
@@ -2410,6 +2539,7 @@ async function renderCalendarView() {
         grid.innerHTML = `<div class="cal-grid-loading">${htmlLoadingRing('md')}</div>`;
     }
     await loadCalendarMonthTasks();
+    await loadCalendarMonthSessions();
     renderCalendarGrid();
     renderCalendarDayPanel();
 }
@@ -2419,6 +2549,7 @@ function setupCalendar() {
     const next = document.getElementById('cal-next-month');
     const form = document.getElementById('cal-add-form');
     const colorRow = document.getElementById('cal-add-colors');
+    const sessionForm = document.getElementById('cal-session-form');
 
     if (prev && !prev.dataset.bound) {
         prev.dataset.bound = '1';
@@ -2467,6 +2598,35 @@ function setupCalendar() {
             if (input) input.value = '';
             await renderCalendarView();
             syncTodayTodoList();
+        });
+    }
+
+    if (sessionForm && !sessionForm.dataset.bound) {
+        sessionForm.dataset.bound = '1';
+        sessionForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) return;
+            const subjectInputEl = document.getElementById('cal-session-subject');
+            const startEl = document.getElementById('cal-session-start');
+            const endEl = document.getElementById('cal-session-end');
+            const statusEl = document.getElementById('cal-session-status');
+            const subject = subjectInputEl?.value || '';
+            const start = startEl?.value || '';
+            const end = endEl?.value || '';
+            const result = await insertManualSessionForUser(calendarSelectedDateKey, subject, start, end);
+            if (statusEl) {
+                statusEl.textContent = result.message;
+                statusEl.style.color = result.ok ? 'var(--accent-green)' : 'var(--accent-red)';
+                statusEl.classList.remove('hidden');
+            }
+            if (!result.ok) return;
+            if (subjectInputEl) subjectInputEl.value = '';
+            if (startEl) startEl.value = '';
+            if (endEl) endEl.value = '';
+            await renderCalendarView();
+            await loadSessions();
+            await loadStats();
+            await loadSubjects();
         });
     }
 }
