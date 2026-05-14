@@ -156,6 +156,7 @@ async function init() {
     setupSettings();
     setupCalendar();
     setupFocusLogsToggle();
+    setupFocusLogEditModal();
 
     // Check if user is already logged in
     const { data: { session } } = await sb.auth.getSession();
@@ -1124,7 +1125,7 @@ async function stopTimer() {
 
     // Save to Supabase
     if (currentSessionId && currentUser) {
-        await sb
+        const { error: stopErr } = await sb
             .from('sessions')
             .update({
                 is_active: false,
@@ -1132,6 +1133,10 @@ async function stopTimer() {
                 duration_seconds: finalSeconds,
             })
             .eq('id', currentSessionId);
+        if (!stopErr && finalSeconds > 0) {
+            const pts = studyPointsForSeconds(finalSeconds);
+            if (pts > 0) await adjustUserTaskPoints(pts);
+        }
         currentSessionId = null;
 
         // Reload data
@@ -1269,27 +1274,67 @@ async function fetchAndRenderFocusLogs(userId) {
         return;
     }
 
+    const canManage = !!(currentUser && userId === currentUser.id);
+
     rows.forEach((session, i) => {
         const item = document.createElement('div');
-        item.className = 'session-item animate-fade-in-up';
+        item.className = 'session-item session-item--row animate-fade-in-up';
         item.style.animationDelay = `${i * 0.08}s`;
         const dur = formatDuration(session.duration_seconds);
         const when = formatSessionDate(session.started_at);
+        const subj = escapeHtml(session.subject || 'Study session');
+
+        const actionsHtml = canManage
+            ? `<div class="session-item__actions" role="group" aria-label="Log actions">
+                <button type="button" class="session-log-btn session-log-btn--edit" title="Edit log" aria-label="Edit log">
+                    <span class="material-symbols-outlined text-base">edit</span>
+                </button>
+                <button type="button" class="session-log-btn session-log-btn--del" title="Delete log" aria-label="Delete log">
+                    <span class="material-symbols-outlined text-base">delete</span>
+                </button>
+            </div>`
+            : '';
+
         item.innerHTML = `
-                <div class="flex items-center gap-4">
-                    <div class="w-11 h-11 rounded-lg flex items-center justify-center" style="background: var(--surface-recess); color: var(--mocha);">
+                <div class="session-item__main flex items-center gap-4 min-w-0 flex-1">
+                    <div class="w-11 h-11 rounded-xl flex-shrink-0 flex items-center justify-center session-item__icon-tile">
                         <span class="material-symbols-outlined">menu_book</span>
                     </div>
-                    <div>
-                        <p class="font-bold text-sm" style="color: var(--text-main);">${session.subject}</p>
+                    <div class="min-w-0">
+                        <p class="font-bold text-sm truncate" style="color: var(--text-main);">${subj}</p>
                         <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: var(--text-muted);">${when}</p>
                     </div>
                 </div>
-                <div class="text-right">
-                    <p class="font-bold tabular-nums" style="color: var(--text-main);">${dur}</p>
+                <div class="session-item__aside flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                    <p class="font-bold tabular-nums text-sm sm:text-base" style="color: var(--text-main);">${dur}</p>
+                    ${actionsHtml}
                 </div>
             `;
         focusLogs.appendChild(item);
+
+        if (canManage) {
+            const editBtn = item.querySelector('.session-log-btn--edit');
+            const delBtn = item.querySelector('.session-log-btn--del');
+            if (editBtn) {
+                editBtn.addEventListener('click', () => openFocusLogEditDialog(session));
+            }
+            if (delBtn) {
+                delBtn.addEventListener('click', async () => {
+                    if (!confirm('Delete this study log? Time and points tied to it will be updated.')) return;
+                    const res = await deleteFocusLogSession(session.id, session.duration_seconds || 0);
+                    if (!res.ok) {
+                        alert(res.message || 'Could not delete.');
+                        return;
+                    }
+                    await refreshFooterTodayProgress();
+                    await refreshFocusLogsStatsView();
+                    const cal = document.getElementById('calendar-view');
+                    if (cal && !cal.classList.contains('hidden')) await renderCalendarView();
+                    await loadSessions();
+                    await loadSubjects();
+                });
+            }
+        }
     });
 
     if (toggleBtn) {
@@ -1302,6 +1347,86 @@ async function fetchAndRenderFocusLogs(userId) {
         } else {
             toggleBtn.classList.add('hidden');
         }
+    }
+}
+
+function openFocusLogEditDialog(session) {
+    const modal = document.getElementById('focus-log-edit-modal');
+    if (!modal || !session?.id) return;
+    const err = document.getElementById('focus-log-edit-error');
+    if (err) {
+        err.classList.add('hidden');
+        err.textContent = '';
+    }
+    modal.dataset.sessionId = session.id;
+    const subEl = document.getElementById('focus-log-edit-subject');
+    const minEl = document.getElementById('focus-log-edit-minutes');
+    if (subEl) subEl.value = session.subject || '';
+    if (minEl) minEl.value = String(Math.max(1, Math.round((Number(session.duration_seconds) || 0) / 60)));
+    modal.classList.remove('hidden');
+}
+
+function setupFocusLogEditModal() {
+    const modal = document.getElementById('focus-log-edit-modal');
+    if (!modal || modal.dataset.bound) return;
+    modal.dataset.bound = '1';
+    const backdrop = document.getElementById('focus-log-edit-backdrop');
+    const cancel = document.getElementById('focus-log-edit-cancel');
+    const save = document.getElementById('focus-log-edit-save');
+    const err = document.getElementById('focus-log-edit-error');
+
+    const close = () => {
+        modal.classList.add('hidden');
+        if (err) {
+            err.classList.add('hidden');
+            err.textContent = '';
+        }
+    };
+
+    if (backdrop) backdrop.addEventListener('click', close);
+    if (cancel) cancel.addEventListener('click', close);
+    if (save) {
+        save.addEventListener('click', async () => {
+            const id = modal.dataset.sessionId;
+            const subEl = document.getElementById('focus-log-edit-subject');
+            const minEl = document.getElementById('focus-log-edit-minutes');
+            const subject = (subEl?.value || '').trim();
+            const mins = Math.floor(Number(minEl?.value));
+            if (!id) return;
+            if (!subject) {
+                if (err) {
+                    err.textContent = 'Please enter a subject.';
+                    err.classList.remove('hidden');
+                }
+                return;
+            }
+            if (!Number.isFinite(mins) || mins < 1 || mins > 10080) {
+                if (err) {
+                    err.textContent = 'Enter a duration between 1 and 10080 minutes (7 days).';
+                    err.classList.remove('hidden');
+                }
+                return;
+            }
+            if (err) {
+                err.classList.add('hidden');
+                err.textContent = '';
+            }
+            const res = await updateFocusLogSession(id, subject, mins * 60);
+            if (!res.ok) {
+                if (err) {
+                    err.textContent = res.message || 'Save failed.';
+                    err.classList.remove('hidden');
+                }
+                return;
+            }
+            close();
+            await refreshFooterTodayProgress();
+            await refreshFocusLogsStatsView();
+            const cal = document.getElementById('calendar-view');
+            if (cal && !cal.classList.contains('hidden')) await renderCalendarView();
+            await loadSessions();
+            await loadSubjects();
+        });
     }
 }
 
@@ -1627,13 +1752,18 @@ async function cleanupStaleSessions(userId) {
         const heartbeat = new Date(session.last_heartbeat_at).getTime();
         if (Date.now() - heartbeat > staleThreshold) {
             console.log('Cleaning up stale own session:', session.id);
-            await sb.from('sessions').update({
+            const dur = Math.floor(
+                (new Date(session.last_heartbeat_at).getTime() - new Date(session.started_at).getTime()) / 1000
+            );
+            const { error: staleErr } = await sb.from('sessions').update({
                 is_active: false,
                 ended_at: new Date(session.last_heartbeat_at).toISOString(),
-                duration_seconds: Math.floor(
-                    (new Date(session.last_heartbeat_at).getTime() - new Date(session.started_at).getTime()) / 1000
-                ),
+                duration_seconds: dur,
             }).eq('id', session.id);
+            if (!staleErr && userId === currentUser?.id && dur > 0) {
+                const pts = studyPointsForSeconds(dur);
+                if (pts > 0) await adjustUserTaskPoints(pts);
+            }
         }
     }
 }
@@ -2261,6 +2391,67 @@ async function adjustUserTaskPoints(delta) {
     if (pts) pts.textContent = next;
 }
 
+/** 10 points per full hour of study time (proportional, rounded). */
+function studyPointsForSeconds(sec) {
+    const s = Math.max(0, Math.floor(Number(sec) || 0));
+    return Math.round((s / 3600) * 10);
+}
+
+async function refreshFocusLogsStatsView() {
+    const radio = document.querySelector('input[name="stats-toggle"]:checked');
+    if (radio?.value === 'partner' && partnerProfile) {
+        await loadStatsFor(partnerProfile.id, partnerProfile);
+    } else if (currentUser && userProfile) {
+        await loadStatsFor(currentUser.id, userProfile);
+    }
+}
+
+async function deleteFocusLogSession(sessionId, durationSeconds) {
+    if (!currentUser) return { ok: false, message: 'Not signed in.' };
+    const prevPts = studyPointsForSeconds(durationSeconds);
+    if (prevPts > 0) await adjustUserTaskPoints(-prevPts);
+    const { error } = await sb.from('sessions').delete().eq('id', sessionId).eq('user_id', currentUser.id);
+    if (error) {
+        if (prevPts > 0) await adjustUserTaskPoints(prevPts);
+        console.warn('Delete session:', error.message);
+        return { ok: false, message: 'Could not delete (check you have delete permission on sessions).' };
+    }
+    return { ok: true };
+}
+
+async function updateFocusLogSession(sessionId, subject, durationSeconds) {
+    if (!currentUser) return { ok: false, message: 'Not signed in.' };
+    const { data: row, error: fetchErr } = await sb
+        .from('sessions')
+        .select('id,user_id,duration_seconds,started_at')
+        .eq('id', sessionId)
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+    if (fetchErr || !row) return { ok: false, message: fetchErr?.message || 'Log not found.' };
+
+    const oldPts = studyPointsForSeconds(row.duration_seconds);
+    const newPts = studyPointsForSeconds(durationSeconds);
+    const started = new Date(row.started_at);
+    const endedAt = new Date(started.getTime() + Math.max(1, durationSeconds) * 1000).toISOString();
+
+    const { error: updErr } = await sb
+        .from('sessions')
+        .update({
+            subject: subject.trim() || 'Study session',
+            duration_seconds: Math.max(1, Math.floor(durationSeconds)),
+            ended_at: endedAt,
+        })
+        .eq('id', sessionId)
+        .eq('user_id', currentUser.id);
+    if (updErr) {
+        console.warn('Update session:', updErr.message);
+        return { ok: false, message: 'Could not save changes.' };
+    }
+    const dPts = newPts - oldPts;
+    if (dPts !== 0) await adjustUserTaskPoints(dPts);
+    return { ok: true };
+}
+
 async function insertCalendarTaskForUser(taskDate, title, colorKey) {
     if (!currentUser || !title.trim()) return null;
     const ck = TASK_COLORS.some((c) => c.key === colorKey) ? colorKey : 'mocha';
@@ -2289,8 +2480,6 @@ async function deleteCalendarTaskById(id) {
 async function setCalendarTaskDone(id, wasDone, nowDone) {
     if (!currentUser) return;
     await sb.from('calendar_tasks').update({ done: nowDone }).eq('id', id).eq('user_id', currentUser.id);
-    if (nowDone && !wasDone) await adjustUserTaskPoints(10);
-    if (!nowDone && wasDone) await adjustUserTaskPoints(-10);
 }
 
 async function loadCalendarMonthTasks() {
@@ -2389,6 +2578,8 @@ async function insertManualSessionForUser(dateKey, subject, startTime, endTime) 
         console.error('Manual session insert:', error.message);
         return { ok: false, message: 'Could not save that session.' };
     }
+    const pts = studyPointsForSeconds(durationSeconds);
+    if (pts > 0) await adjustUserTaskPoints(pts);
     return { ok: true, message: 'Study session added.' };
 }
 
@@ -2522,7 +2713,6 @@ function renderCalendarDayPanel() {
             syncTodayTodoList();
         });
         row.querySelector('.cal-task-del').addEventListener('click', async () => {
-            if (t.done) await adjustUserTaskPoints(-10);
             await deleteCalendarTaskById(t.id);
             await loadCalendarMonthTasks();
             renderCalendarGrid();
@@ -2701,7 +2891,6 @@ async function syncTodayTodoList() {
             }
         });
         item.querySelector('.todo-delete').addEventListener('click', async () => {
-            if (todo.done) await adjustUserTaskPoints(-10);
             await deleteCalendarTaskById(todo.id);
             await syncTodayTodoList();
             const cal = document.getElementById('calendar-view');

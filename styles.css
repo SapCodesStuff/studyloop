@@ -15,6 +15,7 @@
     --surface-chrome: #EDE9E2;
     --nav-track-bg: #E0DAD2;
     --input-fill: #eee9e3;
+    --input-text: var(--text-main);
     --milk-foam: var(--surface-elevated);
     --cream: #E2DDD4;
 
@@ -72,13 +73,15 @@
 }
 
 :root[data-theme="dark"] {
+    color-scheme: dark;
     --bg-page: #12100E;
     --surface-panel: #1A1714;
     --surface-elevated: #242019;
     --surface-recess: #141210;
     --surface-chrome: #1C1815;
     --nav-track-bg: #252019;
-    --input-fill: #181512;
+    --input-fill: #1a1714;
+    --input-text: #c9c1b8;
     --cream: #1E1A17;
     --milk-foam: var(--surface-elevated);
 
@@ -367,8 +370,16 @@ h6 {
 .card-elevated {
     background: var(--milk-foam);
     border: none;
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-md);
+    border-radius: var(--radius-2xl);
+    box-shadow:
+        10px 10px 26px var(--neo-shadow),
+        -8px -8px 22px rgba(255, 253, 248, 0.52);
+}
+
+:root[data-theme="dark"] .card-elevated {
+    box-shadow:
+        8px 8px 22px var(--neo-shadow),
+        -5px -5px 16px rgba(255, 255, 255, 0.04);
 }
 
 /* ========================================
@@ -562,6 +573,10 @@ h6 {
 
 .stats-focus-logs-host {
     position: relative;
+    padding: 1rem 1.1rem 1.2rem;
+    border-radius: var(--radius-xl);
+    background: var(--surface-recess);
+    box-shadow: var(--neo-pressed);
 }
 
 .stats-focus-logs-host .stat-card-loading {
@@ -813,18 +828,7 @@ h6 {
     margin-bottom: 0.25rem;
 }
 
-#stats-view .session-item {
-    box-shadow: var(--shadow-sm);
-}
-
-#stats-view .session-item:hover {
-    box-shadow: var(--shadow-md);
-}
-
-:root[data-theme="dark"] #stats-view .session-item {
-    box-shadow: var(--shadow-sm);
-}
-
+/* Session log cards: shadows from .session-item (neumorphic) */
 /* ========================================
    Pill Inputs & Buttons
    ======================================== */
@@ -836,7 +840,7 @@ h6 {
     background: var(--input-fill);
     font-size: 0.875rem;
     font-weight: 500;
-    color: var(--text-main);
+    color: var(--input-text);
     outline: none;
     box-shadow: var(--neo-pressed);
     transition: box-shadow 0.2s;
@@ -848,6 +852,65 @@ h6 {
 
 .pill-input::placeholder {
     color: var(--latte);
+}
+
+/* Subject field: icon at left:1rem — .pill-input shorthand overwrites Tailwind pl-12; reserve space */
+#subject-input.focus-subject-input,
+.focus-subject-input.pill-input {
+    padding: 0.875rem 1.5rem 0.875rem 3.5rem;
+}
+
+/* ========================================
+   Dark mode: recessed fields stay charcoal; text stays warm grey (not harsh white). */
+:root[data-theme="dark"] input[type="time"],
+:root[data-theme="dark"] input[type="date"],
+:root[data-theme="dark"] input[type="datetime-local"] {
+    color: var(--input-text);
+    background-color: var(--input-fill) !important;
+}
+
+:root[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.72) sepia(0.2);
+    opacity: 0.85;
+}
+
+/*
+ * Tailwind CDN + Forms plugin injects after this file and often sets input backgrounds to white.
+ * Force charcoal fields in dark mode so light text stays readable (settings, chat, to-do, focus, calendar).
+ */
+:root[data-theme="dark"] .settings-input,
+:root[data-theme="dark"] .pill-input,
+:root[data-theme="dark"] .auth-input,
+:root[data-theme="dark"] .todo-input,
+:root[data-theme="dark"] #todo-input,
+:root[data-theme="dark"] .chat-composer {
+    background-color: var(--input-fill) !important;
+    color: var(--input-text) !important;
+}
+
+:root[data-theme="dark"] .chat-composer__input {
+    background-color: transparent !important;
+    color: var(--input-text) !important;
+}
+
+:root[data-theme="dark"] .settings-input::placeholder,
+:root[data-theme="dark"] .pill-input::placeholder,
+:root[data-theme="dark"] .auth-input::placeholder,
+:root[data-theme="dark"] .todo-input::placeholder,
+:root[data-theme="dark"] #todo-input::placeholder,
+:root[data-theme="dark"] .chat-composer__input::placeholder {
+    color: var(--latte) !important;
+    opacity: 1;
+}
+
+:root[data-theme="dark"] input:-webkit-autofill,
+:root[data-theme="dark"] input:-webkit-autofill:hover,
+:root[data-theme="dark"] input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--input-fill) inset !important;
+    box-shadow: 0 0 0 1000px var(--input-fill) inset !important;
+    -webkit-text-fill-color: var(--input-text) !important;
+    caret-color: var(--input-text);
 }
 
 .pill-btn {
@@ -1046,14 +1109,28 @@ h6 {
     flex-direction: column;
     align-items: center;
     padding: 1.15rem 1rem 1.25rem;
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-2xl);
     border: none;
     background: var(--milk-foam);
-    box-shadow: var(--shadow-md);
+    box-shadow:
+        10px 10px 26px var(--neo-shadow),
+        -8px -8px 22px rgba(255, 253, 248, 0.52);
     transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .presence-card:hover {
+    box-shadow:
+        12px 12px 30px var(--neo-shadow-deep),
+        -8px -8px 22px rgba(255, 253, 248, 0.5);
+}
+
+:root[data-theme="dark"] .presence-card {
+    box-shadow:
+        8px 8px 22px var(--neo-shadow),
+        -5px -5px 16px rgba(255, 255, 255, 0.04);
+}
+
+:root[data-theme="dark"] .presence-card:hover {
     box-shadow: var(--shadow-lg);
 }
 
@@ -1236,8 +1313,123 @@ h6 {
     min-height: min(70vh, 28rem);
 }
 
+/* ---- Focus timer: light, tight shadows, crisp (hard) edges ---- */
+.focus-timer-ring__outer {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: radial-gradient(ellipse 105% 105% at 34% 28%, #ffffff 0%, #faf8f5 42%, #f2efe9 78%, #ebe7e1 100%);
+    box-shadow:
+        0 0 0 1px rgba(26, 18, 16, 0.06),
+        8px 9px 16px rgba(26, 18, 16, 0.11),
+        -6px -7px 14px rgba(255, 255, 255, 0.95),
+        inset 2px 2px 5px rgba(255, 255, 255, 0.9),
+        inset -4px -5px 10px rgba(26, 18, 16, 0.05);
+}
+
+.focus-timer-ring__inset {
+    position: absolute;
+    left: 9%;
+    top: 9%;
+    width: 82%;
+    height: 82%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 30%, #f7f4ef 0%, #efeae3 52%, #e6e1da 100%);
+    box-shadow:
+        0 0 0 1px rgba(26, 18, 16, 0.05),
+        inset 4px 5px 12px rgba(26, 18, 16, 0.1),
+        inset -3px -4px 9px rgba(255, 255, 255, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.focus-timer-ring__face {
+    position: absolute;
+    width: 88%;
+    height: 88%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 36% 28%, #ffffff 0%, #faf9f6 50%, #f3f1ec 100%);
+    z-index: 0;
+    box-shadow:
+        0 0 0 1px rgba(26, 18, 16, 0.04),
+        inset 0 1px 2px rgba(255, 255, 255, 0.85),
+        inset 0 -3px 7px rgba(26, 18, 16, 0.04),
+        0 2px 5px rgba(26, 18, 16, 0.06);
+}
+
 .focus-timer-ring__svg {
-    filter: drop-shadow(0 10px 28px rgba(26, 18, 16, 0.12));
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.focus-timer-ring .timer-ring-bg {
+    stroke: #c4bbb3;
+    stroke-opacity: 0.42;
+}
+
+.focus-timer-ring .timer-ring-progress {
+    stroke: #dcc4b4;
+    stroke-opacity: 1;
+    filter:
+        drop-shadow(-0.5px -0.5px 0 rgba(255, 255, 255, 0.7))
+        drop-shadow(0.5px 0.5px 0 rgba(26, 18, 16, 0.1));
+}
+
+.focus-timer-ring .timer-ring-progress.studying {
+    stroke: #dcc4b4;
+}
+
+.focus-timer-display {
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+}
+
+:root[data-theme="dark"] .focus-timer-ring__outer {
+    background: radial-gradient(ellipse 105% 105% at 34% 28%, #34302c 0%, #2a2622 50%, #221f1c 100%);
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.06),
+        7px 8px 14px rgba(0, 0, 0, 0.45),
+        -4px -5px 10px rgba(255, 255, 255, 0.03),
+        inset 2px 2px 5px rgba(255, 255, 255, 0.06),
+        inset -4px -5px 10px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-theme="dark"] .focus-timer-ring__inset {
+    background: radial-gradient(circle at 38% 30%, #2c2825 0%, #24211e 55%, #1d1a18 100%);
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.35),
+        inset 4px 5px 11px rgba(0, 0, 0, 0.42),
+        inset -2px -3px 8px rgba(255, 255, 255, 0.04);
+}
+
+:root[data-theme="dark"] .focus-timer-ring__face {
+    background: radial-gradient(circle at 36% 28%, #32302d 0%, #282522 100%);
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        inset 0 1px 2px rgba(255, 255, 255, 0.07),
+        inset 0 -3px 8px rgba(0, 0, 0, 0.28),
+        0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="dark"] .focus-timer-ring .timer-ring-bg {
+    stroke: #948c85;
+    stroke-opacity: 0.38;
+}
+
+:root[data-theme="dark"] .focus-timer-ring .timer-ring-progress {
+    stroke: #e2cbb8;
+    filter:
+        drop-shadow(-0.5px -0.5px 0 rgba(255, 255, 255, 0.1))
+        drop-shadow(0.5px 0.5px 0 rgba(0, 0, 0, 0.35));
+}
+
+:root[data-theme="dark"] .focus-timer-ring .timer-ring-progress.studying {
+    stroke: #e2cbb8;
 }
 
 .focus-subject-chip {
@@ -1445,7 +1637,7 @@ h6 {
     background: transparent;
     font-size: 0.72rem;
     font-weight: 500;
-    color: var(--text-main);
+    color: var(--input-text);
     outline: none;
     padding: 0.5rem 0;
     font-family: inherit;
@@ -1985,15 +2177,82 @@ h6 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.5rem;
+    gap: 0.75rem 1rem;
+    padding: 1rem 1.25rem;
     background: var(--milk-foam);
     border: none;
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-xl);
+    box-shadow:
+        8px 8px 20px var(--neo-shadow),
+        -5px -5px 16px rgba(255, 253, 248, 0.45);
     transition: box-shadow 0.2s;
 }
 
+.session-item.session-item--row {
+    flex-wrap: wrap;
+}
+
+.session-item__main {
+    flex: 1 1 12rem;
+}
+
+.session-item__aside {
+    flex: 0 0 auto;
+}
+
+.session-item__icon-tile {
+    background: var(--surface-recess);
+    color: var(--mocha);
+    box-shadow: var(--neo-pressed);
+}
+
+.session-item__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.session-log-btn {
+    width: 2.25rem;
+    height: 2.25rem;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-panel);
+    color: var(--mocha);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease, transform 0.15s ease, color 0.15s ease;
+}
+
+.session-log-btn:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.session-log-btn--del {
+    color: var(--accent-red);
+}
+
+.session-log-btn:active {
+    box-shadow: var(--neo-pressed);
+    transform: scale(0.96);
+}
+
+:root[data-theme="dark"] .session-item {
+    box-shadow:
+        6px 6px 18px var(--neo-shadow),
+        -3px -3px 12px rgba(255, 255, 255, 0.03);
+}
+
 .session-item:hover {
+    box-shadow:
+        10px 10px 24px var(--neo-shadow-deep),
+        -6px -6px 18px rgba(255, 253, 248, 0.42);
+}
+
+:root[data-theme="dark"] .session-item:hover {
     box-shadow: var(--shadow-md);
 }
 
@@ -2017,7 +2276,7 @@ h6 {
     border-radius: var(--radius-input);
     background: var(--input-fill);
     font-size: 0.875rem;
-    color: var(--text-main);
+    color: var(--input-text);
     outline: none;
     box-shadow: var(--neo-pressed);
     transition: box-shadow 0.2s;
@@ -2106,13 +2365,13 @@ h6 {
         padding: 1.5rem 1rem !important;
     }
 
-    #dashboard-view > section .focus-timer-ring__svg {
+    #dashboard-view > section .focus-timer-ring {
         width: clamp(220px, 42vw, 260px) !important;
         height: clamp(220px, 42vw, 260px) !important;
     }
 
     #timer-display {
-        font-size: clamp(2.5rem, 7vw, 3.5rem) !important;
+        font-size: clamp(1.65rem, 5.2vw, 2.35rem) !important;
     }
 
     #chat-panel {
@@ -2142,9 +2401,9 @@ h6 {
         gap: 0.5rem;
     }
 
-    .session-item .text-right {
+    .session-item__aside {
         width: 100%;
-        text-align: left !important;
+        justify-content: flex-start;
         padding-left: 3.25rem;
     }
 }
@@ -2297,13 +2556,13 @@ h6 {
     }
 
     /* Timer ring: scale down */
-    #dashboard-view > section .focus-timer-ring__svg {
+    #dashboard-view > section .focus-timer-ring {
         width: 200px !important;
         height: 200px !important;
     }
 
     #timer-display {
-        font-size: 2.75rem !important;
+        font-size: 2.1rem !important;
     }
 
     #timer-subject-badge {
@@ -2320,6 +2579,11 @@ h6 {
     .pill-input {
         padding: 0.65rem 1rem 0.65rem 2.75rem !important;
         font-size: 0.8rem !important;
+    }
+
+    /* Keep extra left gutter so the library icon never collides with typed text */
+    #subject-input.focus-subject-input.pill-input {
+        padding: 0.65rem 1rem 0.65rem 3.35rem !important;
     }
 
     .pill-btn {
@@ -2470,14 +2734,14 @@ h6 {
         gap: 0.35rem;
     }
 
-    .session-item > div:first-child {
+    .session-item__main {
         min-width: 0;
         flex: 1;
     }
 
-    .session-item .text-right {
+    .session-item__aside {
         width: 100%;
-        text-align: left !important;
+        justify-content: flex-start;
         padding-left: 3rem;
     }
 
@@ -2582,13 +2846,13 @@ h6 {
 
 /* ---- Small phones (< 380px) ---- */
 @media (max-width: 380px) {
-    #dashboard-view > section .focus-timer-ring__svg {
+    #dashboard-view > section .focus-timer-ring {
         width: 170px !important;
         height: 170px !important;
     }
 
     #timer-display {
-        font-size: 2.25rem !important;
+        font-size: 1.75rem !important;
     }
 
     #my-card-timer,
@@ -2633,13 +2897,13 @@ h6 {
     }
 
     /* Timer */
-    #dashboard-view > section .focus-timer-ring__svg {
+    #dashboard-view > section .focus-timer-ring {
         width: 240px !important;
         height: 240px !important;
     }
 
     #timer-display {
-        font-size: 3.5rem !important;
+        font-size: 2.65rem !important;
     }
 
     /* Stats KPI */
@@ -2793,7 +3057,7 @@ h6 {
     border-radius: var(--radius-input);
     font-size: 0.65rem;
     font-weight: 500;
-    color: var(--text-main);
+    color: var(--input-text);
     background: var(--input-fill);
     outline: none;
     transition: box-shadow 0.2s;
@@ -2879,7 +3143,7 @@ h6 {
     background: var(--input-fill);
     font-size: 0.85rem;
     font-weight: 600;
-    color: var(--text-main);
+    color: var(--input-text);
     outline: none;
     transition: box-shadow 0.2s;
     font-family: 'Plus Jakarta Sans', sans-serif;

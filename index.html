@@ -199,17 +199,22 @@
                 <!-- CENTER: Focus timer -->
                 <section class="focus-stage flex-1 flex flex-col items-center justify-center p-6 sm:p-8 lg:p-12 min-h-[min(70vh,32rem)] lg:min-h-0">
                     <div class="focus-stage__inner flex flex-col items-center gap-8 w-full max-w-md">
-                        <div class="focus-timer-ring relative flex items-center justify-center">
-                            <svg class="focus-timer-ring__svg w-64 h-64 sm:w-72 sm:h-72" viewBox="0 0 288 288" aria-hidden="true">
-                                <circle class="timer-ring-bg" cx="144" cy="144" r="130" fill="none" stroke-width="11"
-                                    transform="rotate(-90 144 144)" />
-                                <circle id="timer-ring" class="timer-ring-progress" cx="144" cy="144" r="130"
-                                    fill="none" stroke-width="11" stroke-linecap="round" stroke-dasharray="816.81"
-                                    stroke-dashoffset="816.81" transform="rotate(-90 144 144)" />
-                            </svg>
-                            <div class="absolute flex flex-col items-center text-center px-2">
+                        <div class="focus-timer-ring relative flex shrink-0 items-center justify-center w-64 h-64 sm:w-72 sm:h-72">
+                            <div class="focus-timer-ring__outer" aria-hidden="true">
+                                <div class="focus-timer-ring__inset">
+                                    <div class="focus-timer-ring__face" aria-hidden="true"></div>
+                                    <svg class="focus-timer-ring__svg" viewBox="0 0 288 288" aria-hidden="true">
+                                        <circle class="timer-ring-bg" cx="144" cy="144" r="130" fill="none" stroke-width="11"
+                                            transform="rotate(-90 144 144)" />
+                                        <circle id="timer-ring" class="timer-ring-progress" cx="144" cy="144" r="130"
+                                            fill="none" stroke-width="11" stroke-linecap="round" stroke-dasharray="816.81"
+                                            stroke-dashoffset="816.81" transform="rotate(-90 144 144)" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="absolute z-[2] flex flex-col items-center text-center px-2 pointer-events-none">
                                 <span id="timer-display"
-                                    class="text-5xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight tabular-nums"
+                                    class="focus-timer-display text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight tabular-nums"
                                     style="color: var(--text-main);">00:00:00</span>
                                 <div id="timer-subject-badge"
                                     class="mt-3 px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest uppercase hidden focus-subject-chip">
@@ -221,7 +226,7 @@
                         <div class="focus-controls w-full space-y-4 max-w-sm">
                             <label class="sr-only" for="subject-input">Subject</label>
                             <div id="subject-input-wrapper" class="relative">
-                                <input type="text" id="subject-input" class="pill-input focus-subject-input pl-12 pr-6 py-3.5 text-sm"
+                                <input type="text" id="subject-input" class="pill-input focus-subject-input pr-6 py-3.5 text-sm"
                                     placeholder="What are you studying?" autocomplete="off" />
                                 <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-lg pointer-events-none"
                                     style="color: var(--mocha); opacity: 0.85;">local_library</span>
@@ -429,7 +434,7 @@
                             </div>
                         </div>
 
-                        <!-- Task points (calendar tasks) -->
+                        <!-- Study points (time-based) -->
                         <div class="card-elevated p-6 stats-card-host">
                             <div id="stats-load-kpi-points" class="stat-card-loading hidden" aria-hidden="true">
                                 <div class="loading-ring loading-ring--sm" role="presentation"></div>
@@ -438,7 +443,7 @@
                                 <span class="material-symbols-outlined text-lg"
                                     style="color: var(--mocha);">stars</span>
                                 <span class="text-[10px] font-extrabold uppercase tracking-widest font-body"
-                                    style="color: var(--text-muted);">Task Points</span>
+                                    style="color: var(--text-muted);">Study Points</span>
                             </div>
                             <div class="flex items-baseline gap-2">
                                 <span id="stat-points" class="text-4xl font-extrabold tabular-nums"
@@ -446,7 +451,7 @@
                                 <span class="text-sm font-bold uppercase" style="color: var(--latte);">pts</span>
                             </div>
                             <div class="mt-3 stats-kpi-badge">
-                                +10 per task done
+                                +10 per hour studied
                             </div>
                         </div>
                         <!-- Exam Countdown -->
@@ -879,6 +884,32 @@
 
             <!-- Status message -->
             <p id="settings-status" class="text-center text-xs font-bold mt-5 hidden" style="color: var(--accent-green);"></p>
+        </div>
+    </div>
+
+    <!-- ============================================
+       EDIT FOCUS LOG MODAL
+       ============================================ -->
+    <div id="focus-log-edit-modal" class="hidden fixed inset-0 z-[250] flex items-center justify-center p-4">
+        <div id="focus-log-edit-backdrop" class="absolute inset-0" style="background: rgba(61,43,31,0.52);"></div>
+        <div class="settings-card relative w-full max-w-md p-6 sm:p-8">
+            <h3 class="text-lg font-extrabold mb-1" style="color: var(--text-main);">Edit study log</h3>
+            <p class="text-xs font-body mb-5" style="color: var(--text-muted);">Update the subject and how long this session lasted.</p>
+            <div class="flex flex-col gap-4">
+                <div>
+                    <label for="focus-log-edit-subject" class="settings-label">Subject</label>
+                    <input type="text" id="focus-log-edit-subject" class="pill-input w-full mt-1.5" maxlength="200" autocomplete="off" />
+                </div>
+                <div>
+                    <label for="focus-log-edit-minutes" class="settings-label">Duration (minutes)</label>
+                    <input type="number" id="focus-log-edit-minutes" class="pill-input w-full mt-1.5" min="1" max="10080" step="1" />
+                </div>
+            </div>
+            <p id="focus-log-edit-error" class="hidden text-center text-xs font-bold mt-4" style="color: var(--accent-red);"></p>
+            <div class="flex gap-3 mt-6">
+                <button type="button" id="focus-log-edit-cancel" class="pill-btn pill-btn-outline flex-1 py-3 text-xs">Cancel</button>
+                <button type="button" id="focus-log-edit-save" class="pill-btn pill-btn-primary flex-1 py-3 text-xs">Save</button>
+            </div>
         </div>
     </div>
 
