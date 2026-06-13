@@ -125,6 +125,13 @@
             </nav>
 
             <div class="app-header__actions">
+                <button id="header-chat-btn" type="button"
+                    class="hide-mobile relative w-9 h-9 flex items-center justify-center rounded-full"
+                    style="background: var(--surface-panel); color: var(--mocha);"
+                    title="Open chat" aria-label="Open chat">
+                    <span class="material-symbols-outlined text-lg">forum</span>
+                    <span id="header-chat-badge" class="chat-unread-badge hidden" aria-hidden="true">0</span>
+                </button>
                 <button id="settings-btn" class="w-9 h-9 flex items-center justify-center rounded-full"
                     style="background: var(--surface-panel); color: var(--mocha);"
                     title="Settings">
@@ -256,7 +263,7 @@
 
                 <!-- RIGHT: Chat -->
                 <aside id="chat-panel"
-                    class="chat-shell w-full lg:w-[22rem] flex-shrink-0 flex flex-col lg:border-l fixed inset-0 lg:static z-40 translate-x-full lg:translate-x-0 transition-transform duration-300 ease-out"
+                    class="chat-shell chat-panel chat-panel--closed w-full lg:w-[22rem] flex-shrink-0 flex flex-col lg:border-l fixed inset-0 lg:static z-40"
                     style="border-color: var(--border-coffee);">
                     <header class="chat-shell__header">
                         <div class="chat-shell__brand">
@@ -271,9 +278,9 @@
                                 <span class="chat-live-pill__dot"></span>
                                 <span class="chat-live-pill__label">Live</span>
                             </div>
-                            <button type="button" id="close-chat"
-                                class="lg:hidden chat-shell__close w-9 h-9 flex items-center justify-center rounded-full"
-                                aria-label="Close chat">
+                            <button type="button" id="minimize-chat"
+                                class="chat-shell__close w-9 h-9 flex items-center justify-center rounded-full"
+                                aria-label="Minimize chat">
                                 <span class="material-symbols-outlined">close</span>
                             </button>
                         </div>
@@ -504,29 +511,30 @@
                             </div>
                         </div>
 
-                        <!-- Consistency Heatmap -->
+                        <!-- Study calendar (heatmap-style) -->
                         <div class="card-elevated p-6 lg:p-7 flex flex-col gap-5 stats-chart-card stats-card-host">
-                            <div id="stats-load-heatmap" class="stat-card-loading hidden" aria-hidden="true">
+                            <div id="stats-load-study-cal" class="stat-card-loading hidden" aria-hidden="true">
                                 <div class="loading-ring loading-ring--sm" role="presentation"></div>
                             </div>
-                            <div class="stats-card-head flex items-center justify-between">
+                            <div class="stats-card-head flex items-center justify-between gap-3">
                                 <h3 class="font-bold flex items-center gap-2" style="color: var(--text-main);"><span
                                         class="material-symbols-outlined text-lg"
-                                        style="color: var(--mocha);">grid_view</span> Consistency Map</h3>
-                                <span class="text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded"
-                                    style="background: rgba(230,213,195,0.3); color: var(--text-muted);">Last 90
-                                    Days</span>
+                                        style="color: var(--mocha);">calendar_month</span> Study Calendar</h3>
+                                <div class="stats-study-cal-nav">
+                                    <button type="button" id="stats-cal-prev" class="stats-study-cal-nav-btn" title="Previous month" aria-label="Previous month">
+                                        <span class="material-symbols-outlined text-lg">chevron_left</span>
+                                    </button>
+                                    <span id="stats-study-cal-title" class="stats-study-cal-title">—</span>
+                                    <button type="button" id="stats-cal-next" class="stats-study-cal-nav-btn" title="Next month" aria-label="Next month">
+                                        <span class="material-symbols-outlined text-lg">chevron_right</span>
+                                    </button>
+                                </div>
                             </div>
-                            <div id="heatmap-grid" class="grid grid-cols-12 gap-[5px]">
-                                <!-- JS fills 60 cells -->
+                            <div class="stats-study-cal-dow">
+                                <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
                             </div>
-                            <div class="flex items-center justify-between mt-1 px-1">
-                                <span class="text-[9px] font-bold uppercase tracking-widest"
-                                    style="color: var(--text-muted);">Dec</span>
-                                <span class="text-[9px] font-bold uppercase tracking-widest"
-                                    style="color: var(--text-muted);">Jan</span>
-                                <span class="text-[9px] font-bold uppercase tracking-widest"
-                                    style="color: var(--text-muted);">Feb</span>
+                            <div id="stats-study-cal-grid" class="stats-study-cal-grid">
+                                <!-- JS fills month grid -->
                             </div>
                             <div class="flex items-center justify-end gap-2 pt-3"
                                 style="border-top: 1px solid rgba(230,213,195,0.3);">
@@ -731,9 +739,11 @@
                 </button>
             </div>
             <button id="mob-chat-btn" type="button"
-                class="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5"
-                style="background: var(--espresso); color: var(--text-inverse);">
+                class="relative w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5"
+                style="background: var(--espresso); color: var(--text-inverse);"
+                aria-label="Open chat">
                 <span class="material-symbols-outlined text-lg">forum</span>
+                <span id="mob-chat-badge" class="chat-unread-badge hidden" aria-hidden="true">0</span>
             </button>
         </nav>
 

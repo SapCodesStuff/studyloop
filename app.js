@@ -77,14 +77,18 @@ const chatPanel = $('#chat-panel');
 const chatMessages = $('#chat-messages');
 const chatForm = $('#chat-form');
 const chatInput = $('#chat-input');
-const closeChat = $('#close-chat');
+const minimizeChatBtn = $('#minimize-chat');
 const mobChatBtn = $('#mob-chat-btn');
+const headerChatBtn = $('#header-chat-btn');
+const mobChatBadge = $('#mob-chat-badge');
+const headerChatBadge = $('#header-chat-badge');
+
+// Stats study calendar
+const statsStudyCalGrid = $('#stats-study-cal-grid');
+const statsStudyCalTitle = $('#stats-study-cal-title');
 
 // Header
 const headerInitial = $('#header-initial');
-
-// Heatmap
-const heatmapGrid = $('#heatmap-grid');
 
 // Focus Logs
 const focusLogs = $('#focus-logs');
@@ -106,8 +110,12 @@ let currentUser = null;
 let userProfile = null;
 let partnerProfile = null;
 let partnerTimerInterval = null;
-/** Wall-clock ms when partner's active session started (null if idle) */
-let partnerSessionStartMs = null;
+/** Partner active session: accumulated studied seconds at last heartbeat/pause */
+let partnerSessionDurationSeconds = 0;
+/** Partner session last_heartbeat_at as epoch ms (null if idle) */
+let partnerSessionHeartbeatMs = null;
+/** Partner session started_at as epoch ms (null if idle) */
+let partnerSessionStartedMs = null;
 /** Completed session seconds for partner for local calendar day (excludes live active session) */
 let partnerTodayCompletedSum = 0;
 /** Partner's last_app_activity_at as epoch ms (0 = unknown) */
@@ -119,6 +127,14 @@ let partnerProfilePollIntervalId = null;
 let currentSessionId = null;
 let calendarRealtimeChannel = null;
 let chatRealtimeChannel = null;
+let chatIsOpen = false;
+let chatUnreadCount = 0;
+const BASE_PAGE_TITLE = 'StudyLoop — Just you and your study buddy';
+let statsStudyMonthDisplayed = (() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1, 12, 0, 0, 0);
+})();
+let statsStudyCalSessionsCache = [];
 let lastTodoDateKey = null;
 let todoDateCheckIntervalId = null;
 let focusLogsExpanded = false;
@@ -157,6 +173,7 @@ async function init() {
     setupCalendar();
     setupFocusLogsToggle();
     setupFocusLogEditModal();
+    setupStatsStudyCalNav();
 
     // Check if user is already logged in
     const { data: { session } } = await sb.auth.getSession();
@@ -459,13 +476,39 @@ async function loadSessions() {
         .maybeSingle();
 
     if (activeData) {
-        // Recover active session (wall-clock elapsed; not dependent on tab visibility)
-        currentSessionId = activeData.id;
-        currentSubject = activeData.subject;
-        pausedAccumulatedSeconds = 0;
-        studySegmentStartMs = new Date(activeData.started_at).getTime();
-        startTimer(true); // true = recovering, don't insert session / reset anchors
+        await recoverActiveSession(activeData);
     }
+}
+
+async function recoverActiveSession(activeData) {
+    currentSessionId = activeData.id;
+    currentSubject = activeData.subject;
+    pausedAccumulatedSeconds = activeData.duration_seconds || 0;
+
+    controlsIdle.classList.add('hidden');
+    controlsActive.classList.remove('hidden');
+    subjectInputWrapper.classList.add('hidden');
+    timerSubjectBadge.classList.remove('hidden');
+    timerSubjectText.textContent = currentSubject;
+    myStatusPill.textContent = currentSubject;
+    myStatusPill.style.background = 'var(--espresso)';
+    myStatusPill.style.color = 'var(--milk-foam)';
+    myStatusPill.style.border = 'none';
+    timerRing.classList.add('studying');
+
+    if (activeData.is_paused) {
+        timerState = 'paused';
+        studySegmentStartMs = null;
+        pauseIcon.textContent = 'play_arrow';
+        pauseText.textContent = 'Resume';
+        timerSeconds = pausedAccumulatedSeconds;
+        myPresenceDot.className = 'presence-dot online';
+        refreshStudyTimerUI();
+        return;
+    }
+
+    studySegmentStartMs = new Date(activeData.last_heartbeat_at || activeData.started_at).getTime();
+    await startTimer(true);
 }
 
 async function loadChatHistory() {
@@ -496,14 +539,8 @@ async function loadChatHistory() {
         .channel('messages')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
             const msg = payload.new;
-
-            // Clear the "no messages" placeholder if present
-            const placeholder = chatMessages.querySelector('p');
-            if (placeholder && chatMessages.children.length === 1) chatMessages.innerHTML = '';
-
             const isOutgoing = currentUser && msg.sender_id === currentUser.id;
-            const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            addChatMessage(msg.content, isOutgoing, time, msg.id);
+            onIncomingChatMessage(msg, isOutgoing);
         })
         .subscribe();
 }
@@ -942,7 +979,10 @@ function clearDashboardIntervalsAndPresence() {
     studySegmentStartMs = null;
     pausedAccumulatedSeconds = 0;
     partnerProfile = null;
-    partnerSessionStartMs = null;
+    partnerSessionDurationSeconds = 0;
+    partnerSessionHeartbeatMs = null;
+    partnerSessionPaused = false;
+    partnerSessionStartedMs = null;
     partnerLastActivityAtMs = 0;
     focusLogsExpanded = false;
     myTodayCompletedFromDb = 0;
@@ -1105,6 +1145,16 @@ function pauseTimer() {
     timerSeconds = pausedAccumulatedSeconds;
     pauseIcon.textContent = 'play_arrow';
     pauseText.textContent = 'Resume';
+    myPresenceDot.className = 'presence-dot online';
+    refreshStudyTimerUI();
+
+    if (currentSessionId && currentUser) {
+        sb.from('sessions').update({
+            is_paused: true,
+            duration_seconds: pausedAccumulatedSeconds,
+            last_heartbeat_at: new Date().toISOString(),
+        }).eq('id', currentSessionId).then(() => { });
+    }
 }
 
 function resumeTimer() {
@@ -1112,7 +1162,15 @@ function resumeTimer() {
     studySegmentStartMs = Date.now();
     pauseIcon.textContent = 'pause';
     pauseText.textContent = 'Pause';
+    myPresenceDot.className = 'presence-dot studying';
     timerInterval = setInterval(tickTimer, 1000);
+
+    if (currentSessionId && currentUser) {
+        sb.from('sessions').update({
+            is_paused: false,
+            last_heartbeat_at: new Date().toISOString(),
+        }).eq('id', currentSessionId).then(() => { });
+    }
 }
 
 async function stopTimer() {
@@ -1129,6 +1187,7 @@ async function stopTimer() {
             .from('sessions')
             .update({
                 is_active: false,
+                is_paused: false,
                 ended_at: new Date().toISOString(),
                 duration_seconds: finalSeconds,
             })
@@ -1165,11 +1224,12 @@ async function stopTimer() {
 function tickTimer() {
     refreshStudyTimerUI();
 
-    // Heartbeat every 30 seconds (wall-clock seconds, correct after background tabs)
-    if (timerSeconds > 0 && timerSeconds % 30 === 0 && currentSessionId && currentUser) {
+    // Heartbeat every 30 seconds while actively studying
+    if (timerState === 'studying' && timerSeconds > 0 && timerSeconds % 30 === 0 && currentSessionId && currentUser) {
         sb.from('sessions').update({
             last_heartbeat_at: new Date().toISOString(),
             duration_seconds: timerSeconds,
+            is_paused: false,
         }).eq('id', currentSessionId).then(() => { });
     }
 }
@@ -1453,17 +1513,69 @@ function formatSessionDate(isoString) {
 // =============================================
 // Chat
 // =============================================
+function isChatPanelOpen() {
+    return chatPanel && chatPanel.classList.contains('chat-panel--open');
+}
+
+function setChatOpen(open) {
+    if (!chatPanel) return;
+    chatIsOpen = open;
+    chatPanel.classList.toggle('chat-panel--open', open);
+    chatPanel.classList.toggle('chat-panel--closed', !open);
+    chatPanel.setAttribute('aria-hidden', open ? 'false' : 'true');
+
+    if (open) {
+        chatUnreadCount = 0;
+        updateChatNotifications();
+        requestAnimationFrame(() => {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+    }
+}
+
+function toggleChatPanel() {
+    setChatOpen(!isChatPanelOpen());
+}
+
+function initChatPanelState() {
+    const openByDefault = window.matchMedia('(min-width: 769px)').matches;
+    setChatOpen(openByDefault);
+}
+
+function updateChatNotifications() {
+    const label = chatUnreadCount > 9 ? '9+' : String(chatUnreadCount);
+    const show = chatUnreadCount > 0 && !chatIsOpen;
+
+    [mobChatBadge, headerChatBadge].forEach((badge) => {
+        if (!badge) return;
+        badge.textContent = label;
+        badge.classList.toggle('hidden', !show);
+    });
+
+    document.title = show
+        ? `(${label}) ${BASE_PAGE_TITLE}`
+        : BASE_PAGE_TITLE;
+}
+
+function onIncomingChatMessage(msg, isOutgoing) {
+    const placeholder = chatMessages.querySelector('.chat-empty-hint, p');
+    if (placeholder && chatMessages.children.length <= 1) chatMessages.innerHTML = '';
+
+    const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    addChatMessage(msg.content, isOutgoing, time, msg.id);
+
+    if (!isOutgoing && !chatIsOpen) {
+        chatUnreadCount += 1;
+        updateChatNotifications();
+    }
+}
+
 function setupChat() {
-    if (mobChatBtn) {
-        mobChatBtn.addEventListener('click', () => {
-            chatPanel.classList.toggle('translate-x-full');
-        });
-    }
-    if (closeChat) {
-        closeChat.addEventListener('click', () => {
-            chatPanel.classList.add('translate-x-full');
-        });
-    }
+    initChatPanelState();
+
+    if (mobChatBtn) mobChatBtn.addEventListener('click', toggleChatPanel);
+    if (headerChatBtn) headerChatBtn.addEventListener('click', toggleChatPanel);
+    if (minimizeChatBtn) minimizeChatBtn.addEventListener('click', () => setChatOpen(false));
 
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -1574,19 +1686,76 @@ function updatePartnerTabStatusUI() {
 }
 
 function partnerLiveSecondsForTodayTotal() {
-    if (partnerSessionStartMs == null) return 0;
+    if (partnerSessionHeartbeatMs == null || !partnerSessionStartedMs) return 0;
     const { start } = getLocalDayBounds();
-    const effectiveStart = Math.max(partnerSessionStartMs, start.getTime());
-    return Math.floor((Date.now() - effectiveStart) / 1000);
+    if (partnerSessionStartedMs >= start.getTime()) {
+        return getPartnerLiveElapsedSeconds();
+    }
+    if (partnerSessionPaused) return 0;
+    return Math.floor((Date.now() - start.getTime()) / 1000);
+}
+
+function getPartnerLiveElapsedSeconds() {
+    if (partnerSessionHeartbeatMs == null) return 0;
+    if (partnerSessionPaused) return partnerSessionDurationSeconds;
+    const sinceHeartbeat = Math.floor((Date.now() - partnerSessionHeartbeatMs) / 1000);
+    return partnerSessionDurationSeconds + Math.max(0, sinceHeartbeat);
+}
+
+function clearPartnerSessionState() {
+    partnerSessionPaused = false;
+    partnerSessionDurationSeconds = 0;
+    partnerSessionHeartbeatMs = null;
+    partnerSessionStartedMs = null;
+}
+
+function renderPartnerIdleUI() {
+    clearPartnerSessionState();
+    partnerStatusText.textContent = 'Idle';
+    partnerStatusText.style.background = '';
+    partnerStatusText.style.color = 'var(--text-muted)';
+    partnerStatusText.style.padding = '';
+    partnerStatusText.style.borderRadius = '';
+    partnerPresenceDot.className = 'presence-dot online';
+    partnerCardTimer.textContent = '00:00:00';
+    partnerCardTimer.style.color = 'var(--border-coffee)';
+}
+
+function applyPartnerSessionRow(sessionRow) {
+    if (!sessionRow || !sessionRow.is_active) {
+        renderPartnerIdleUI();
+        return;
+    }
+
+    partnerSessionPaused = !!sessionRow.is_paused;
+    partnerSessionDurationSeconds = sessionRow.duration_seconds || 0;
+    partnerSessionHeartbeatMs = new Date(sessionRow.last_heartbeat_at || sessionRow.started_at).getTime();
+    partnerSessionStartedMs = new Date(sessionRow.started_at).getTime();
+
+    if (partnerSessionPaused) {
+        partnerStatusText.textContent = `${sessionRow.subject} · Paused`;
+        partnerStatusText.style.background = 'rgba(230,213,195,0.45)';
+        partnerStatusText.style.color = 'var(--mocha)';
+        partnerStatusText.style.padding = '2px 12px';
+        partnerStatusText.style.borderRadius = 'var(--radius-full)';
+        partnerPresenceDot.className = 'presence-dot online';
+        partnerCardTimer.style.color = 'var(--mocha)';
+    } else {
+        partnerStatusText.textContent = sessionRow.subject;
+        partnerStatusText.style.background = 'var(--espresso)';
+        partnerStatusText.style.color = 'var(--milk-foam)';
+        partnerStatusText.style.padding = '2px 12px';
+        partnerStatusText.style.borderRadius = 'var(--radius-full)';
+        partnerPresenceDot.className = 'presence-dot studying';
+        partnerCardTimer.style.color = 'var(--espresso)';
+    }
+    partnerCardTimer.textContent = formatTime(getPartnerLiveElapsedSeconds());
 }
 
 function tickPartnerUI() {
     if (!partnerProfile || !partnerCardToday) return;
-    const liveSession = partnerSessionStartMs != null
-        ? Math.floor((Date.now() - partnerSessionStartMs) / 1000)
-        : 0;
-    if (partnerSessionStartMs != null) {
-        partnerCardTimer.textContent = formatTime(liveSession);
+    if (partnerSessionHeartbeatMs != null) {
+        partnerCardTimer.textContent = formatTime(getPartnerLiveElapsedSeconds());
     }
     const todayTotal = partnerTodayCompletedSum + partnerLiveSecondsForTodayTotal();
     partnerCardToday.textContent = `Today: ${formatDuration(todayTotal)}`;
@@ -1610,7 +1779,7 @@ async function loadPartner() {
     if (error || !allUsers || allUsers.length === 0) {
         stopPartnerPoll();
         partnerLastActivityAtMs = 0;
-        partnerSessionStartMs = null;
+        clearPartnerSessionState();
         partnerCardName.textContent = 'No partner yet';
         partnerCardName.classList.add('presence-card__name--muted');
         partnerStatusText.textContent = 'Invite someone!';
@@ -1648,7 +1817,15 @@ async function loadPartner() {
             schema: 'public',
             table: 'sessions',
             filter: `user_id=eq.${partnerProfile.id}`
-        }, async () => {
+        }, async (payload) => {
+            if (payload.new) {
+                applyPartnerSessionRow(payload.new);
+                if (!payload.new.is_active) {
+                    await refreshPartnerTodayTotals();
+                    tickPartnerUI();
+                }
+            }
+
             await checkPartnerSession();
 
             // If stats view is open and showing partner stats, auto-refresh
@@ -1692,45 +1869,35 @@ async function checkPartnerSession() {
     let sessionRow = activeSession;
 
     if (activeSession) {
-        const heartbeat = new Date(activeSession.last_heartbeat_at).getTime();
-        const staleThreshold = 2 * 60 * 1000; // 2 minutes
-
-        if (Date.now() - heartbeat > staleThreshold) {
-            console.log('Detected stale partner session, marking as inactive...');
-            await sb.from('sessions').update({
-                is_active: false,
-                ended_at: new Date(activeSession.last_heartbeat_at).toISOString(),
-                duration_seconds: Math.floor(
-                    (new Date(activeSession.last_heartbeat_at).getTime() - new Date(activeSession.started_at).getTime()) / 1000
-                ),
-            }).eq('id', activeSession.id);
-        } else {
+        if (activeSession.is_paused) {
             isActuallyStudying = true;
+        } else {
+            const heartbeat = new Date(activeSession.last_heartbeat_at).getTime();
+            const staleThreshold = 2 * 60 * 1000; // 2 minutes
+
+            if (Date.now() - heartbeat > staleThreshold) {
+                console.log('Detected stale partner session, marking as inactive...');
+                const dur = activeSession.duration_seconds || Math.floor(
+                    (new Date(activeSession.last_heartbeat_at).getTime() - new Date(activeSession.started_at).getTime()) / 1000
+                );
+                await sb.from('sessions').update({
+                    is_active: false,
+                    is_paused: false,
+                    ended_at: new Date(activeSession.last_heartbeat_at).toISOString(),
+                    duration_seconds: dur,
+                }).eq('id', activeSession.id);
+            } else {
+                isActuallyStudying = true;
+            }
         }
     }
 
     await refreshPartnerTodayTotals();
 
-    if (isActuallyStudying) {
-        partnerSessionStartMs = new Date(sessionRow.started_at).getTime();
-        partnerStatusText.textContent = sessionRow.subject;
-        partnerStatusText.style.background = 'var(--espresso)';
-        partnerStatusText.style.color = 'var(--milk-foam)';
-        partnerStatusText.style.padding = '2px 12px';
-        partnerStatusText.style.borderRadius = 'var(--radius-full)';
-        partnerPresenceDot.className = 'presence-dot studying';
-        partnerCardTimer.style.color = 'var(--espresso)';
-        partnerCardTimer.textContent = formatTime(Math.floor((Date.now() - partnerSessionStartMs) / 1000));
+    if (isActuallyStudying && sessionRow) {
+        applyPartnerSessionRow(sessionRow);
     } else {
-        partnerSessionStartMs = null;
-        partnerStatusText.textContent = 'Idle';
-        partnerStatusText.style.background = '';
-        partnerStatusText.style.color = 'var(--text-muted)';
-        partnerStatusText.style.padding = '';
-        partnerStatusText.style.borderRadius = '';
-        partnerPresenceDot.className = 'presence-dot online';
-        partnerCardTimer.textContent = '00:00:00';
-        partnerCardTimer.style.color = 'var(--border-coffee)';
+        renderPartnerIdleUI();
     }
 
     partnerTimerInterval = setInterval(tickPartnerUI, 1000);
@@ -1749,14 +1916,16 @@ async function cleanupStaleSessions(userId) {
 
     const staleThreshold = 2 * 60 * 1000; // 2 minutes
     for (const session of staleSessions) {
+        if (session.is_paused) continue;
         const heartbeat = new Date(session.last_heartbeat_at).getTime();
         if (Date.now() - heartbeat > staleThreshold) {
             console.log('Cleaning up stale own session:', session.id);
-            const dur = Math.floor(
+            const dur = session.duration_seconds || Math.floor(
                 (new Date(session.last_heartbeat_at).getTime() - new Date(session.started_at).getTime()) / 1000
             );
             const { error: staleErr } = await sb.from('sessions').update({
                 is_active: false,
+                is_paused: false,
                 ended_at: new Date(session.last_heartbeat_at).toISOString(),
                 duration_seconds: dur,
             }).eq('id', session.id);
@@ -2202,7 +2371,7 @@ const STATS_SECTION_LOAD_IDS = [
     'stats-load-kpi-goal',
     'stats-load-kpi-points',
     'stats-load-subject',
-    'stats-load-heatmap',
+    'stats-load-study-cal',
     'stats-load-start-hour',
     'stats-load-focus-logs',
 ];
@@ -2283,36 +2452,9 @@ async function loadStatsFor(userId, profile) {
     renderSessionStartInsights(allSessions);
     hideStatsSectionLoader('stats-load-start-hour');
 
-    // Heatmap
-    heatmapGrid.innerHTML = '';
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    const { data: dailyData } = await sb
-        .from('daily_stats')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('session_date', ninetyDaysAgo.toISOString().split('T')[0]);
-
-    const dailyMap = {};
-    if (dailyData) {
-        dailyData.forEach(d => { dailyMap[d.session_date] = d.total_seconds || 0; });
-    }
-    for (let i = 59; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - (i * 1.5));
-        const key = d.toISOString().split('T')[0];
-        const sec = dailyMap[key] || 0;
-        let lvl = 0;
-        if (sec > 0) lvl = 1;
-        if (sec > 1800) lvl = 2;
-        if (sec > 3600) lvl = 3;
-        if (sec > 7200) lvl = 4;
-        const cell = document.createElement('div');
-        cell.className = `heatmap-cell hm-${lvl}`;
-        cell.title = `${key}: ${formatDuration(sec)}`;
-        heatmapGrid.appendChild(cell);
-    }
-    hideStatsSectionLoader('stats-load-heatmap');
+    statsStudyCalSessionsCache = allSessions;
+    renderStatsStudyCalendar(allSessions);
+    hideStatsSectionLoader('stats-load-study-cal');
 
     // Render subject distribution chart
     await renderSubjectChart(userId);
@@ -2322,6 +2464,100 @@ async function loadStatsFor(userId, profile) {
     hideStatsSectionLoader('stats-load-focus-logs');
     } finally {
         if (gen === statsLoadGeneration) hideAllStatsSectionLoaders();
+    }
+}
+
+// =============================================
+// Stats study calendar (local-day totals, heatmap colors)
+// =============================================
+function setupStatsStudyCalNav() {
+    const prev = document.getElementById('stats-cal-prev');
+    const next = document.getElementById('stats-cal-next');
+    if (prev && !prev.dataset.bound) {
+        prev.dataset.bound = '1';
+        prev.addEventListener('click', () => {
+            statsStudyMonthDisplayed.setMonth(statsStudyMonthDisplayed.getMonth() - 1);
+            renderStatsStudyCalendar(statsStudyCalSessionsCache);
+        });
+    }
+    if (next && !next.dataset.bound) {
+        next.dataset.bound = '1';
+        next.addEventListener('click', () => {
+            statsStudyMonthDisplayed.setMonth(statsStudyMonthDisplayed.getMonth() + 1);
+            renderStatsStudyCalendar(statsStudyCalSessionsCache);
+        });
+    }
+}
+
+function aggregateSessionsByLocalDate(sessions) {
+    const map = {};
+    for (const s of sessions || []) {
+        if (!s.started_at) continue;
+        const key = formatLocalDateKey(new Date(s.started_at));
+        map[key] = (map[key] || 0) + (Number(s.duration_seconds) || 0);
+    }
+    return map;
+}
+
+function heatmapLevelForSeconds(sec) {
+    if (sec <= 0) return 0;
+    if (sec <= 1800) return 1;
+    if (sec <= 3600) return 2;
+    if (sec <= 7200) return 3;
+    return 4;
+}
+
+function formatStudyCalHours(sec) {
+    if (!sec || sec <= 0) return '';
+    const hrs = sec / 3600;
+    if (hrs < 1) return `${Math.max(1, Math.round(sec / 60))}m`;
+    return `${hrs.toFixed(1)}h`;
+}
+
+function renderStatsStudyCalendar(allSessions) {
+    const grid = statsStudyCalGrid || document.getElementById('stats-study-cal-grid');
+    const titleEl = statsStudyCalTitle || document.getElementById('stats-study-cal-title');
+    if (!grid || !titleEl) return;
+
+    const dailyMap = aggregateSessionsByLocalDate(allSessions);
+    const y = statsStudyMonthDisplayed.getFullYear();
+    const m = statsStudyMonthDisplayed.getMonth();
+    titleEl.textContent = statsStudyMonthDisplayed.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+
+    const first = new Date(y, m, 1);
+    const gridStart = new Date(first);
+    gridStart.setDate(first.getDate() - first.getDay());
+    const todayKey = formatLocalDateKey(new Date());
+
+    grid.innerHTML = '';
+    for (let i = 0; i < 42; i++) {
+        const cellDate = new Date(gridStart);
+        cellDate.setDate(gridStart.getDate() + i);
+        const key = formatLocalDateKey(cellDate);
+        const inMonth = cellDate.getMonth() === m;
+        const sec = dailyMap[key] || 0;
+        const lvl = heatmapLevelForSeconds(sec);
+
+        const cell = document.createElement('div');
+        cell.className = `stats-study-cal-cell hm-${lvl}`;
+        if (!inMonth) cell.classList.add('stats-study-cal-cell--dim');
+        if (key === todayKey) cell.classList.add('stats-study-cal-cell--today');
+
+        const num = document.createElement('span');
+        num.className = 'stats-study-cal-cell__day';
+        num.textContent = String(cellDate.getDate());
+        cell.appendChild(num);
+
+        if (sec > 0) {
+            const hrs = document.createElement('span');
+            hrs.className = 'stats-study-cal-cell__hrs';
+            hrs.textContent = formatStudyCalHours(sec);
+            cell.appendChild(hrs);
+        }
+
+        const label = cellDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+        cell.title = `${label}: ${formatDuration(sec)}`;
+        grid.appendChild(cell);
     }
 }
 

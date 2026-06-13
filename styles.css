@@ -1512,6 +1512,92 @@ h6 {
     box-shadow: -8px 0 24px var(--neo-shadow), 4px 0 16px var(--neo-highlight);
 }
 
+.chat-panel {
+    transition:
+        transform 0.38s cubic-bezier(0.32, 0.72, 0, 1),
+        opacity 0.3s ease,
+        width 0.38s cubic-bezier(0.32, 0.72, 0, 1),
+        min-width 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+    will-change: transform, opacity, width;
+}
+
+.chat-panel.chat-panel--closed {
+    pointer-events: none;
+}
+
+.chat-panel.chat-panel--open {
+    pointer-events: auto;
+}
+
+.chat-unread-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.28rem;
+    border-radius: var(--radius-full);
+    background: var(--accent-red);
+    color: #fff;
+    font-size: 0.5625rem;
+    font-weight: 800;
+    line-height: 1.1rem;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(192, 57, 43, 0.45);
+    animation: chat-badge-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.chat-unread-badge.hidden {
+    display: none;
+}
+
+@keyframes chat-badge-pop {
+    from {
+        transform: scale(0.4);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+#header-chat-btn .chat-unread-badge {
+    top: -2px;
+    right: -2px;
+}
+
+@media (min-width: 769px) {
+    #chat-panel.chat-panel--closed {
+        width: 0 !important;
+        min-width: 0 !important;
+        max-width: 0 !important;
+        opacity: 0;
+        overflow: hidden;
+        border-left-width: 0 !important;
+        transform: translateX(14px);
+    }
+
+    #chat-panel.chat-panel--open {
+        width: 22rem !important;
+        min-width: 12rem;
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@media (max-width: 768px) {
+    #chat-panel.chat-panel--closed {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    #chat-panel.chat-panel--open {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
 .chat-shell__header {
     display: flex;
     align-items: center;
@@ -1700,16 +1786,17 @@ h6 {
 }
 
 /* ========================================
-   Heatmap
+   Heatmap intensity + stats study calendar
    ======================================== */
-.heatmap-cell {
-    aspect-ratio: 1;
-    border-radius: 3px;
-    transition: transform 0.1s ease;
+.heatmap-cell,
+.stats-study-cal-cell {
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-.heatmap-cell:hover {
-    transform: scale(1.2);
+.heatmap-cell:hover,
+.stats-study-cal-cell:hover {
+    transform: scale(1.06);
+    z-index: 1;
 }
 
 .hm-0 {
@@ -1750,6 +1837,107 @@ h6 {
 
 :root[data-theme="dark"] .hm-4 {
     background: rgba(201, 168, 140, 0.88);
+}
+
+.stats-study-cal-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.stats-study-cal-nav-btn {
+    width: 1.75rem;
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--surface-panel);
+    color: var(--mocha);
+    box-shadow: var(--neo-pressed);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stats-study-cal-nav-btn:hover {
+    transform: scale(1.05);
+}
+
+.stats-study-cal-title {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    min-width: 5.5rem;
+    text-align: center;
+}
+
+.stats-study-cal-dow {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+    padding: 0 2px;
+}
+
+.stats-study-cal-dow span {
+    text-align: center;
+    font-size: 0.5625rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.stats-study-cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.stats-study-cal-cell {
+    aspect-ratio: 1;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    min-height: 2.35rem;
+    position: relative;
+    cursor: default;
+}
+
+.stats-study-cal-cell--dim {
+    opacity: 0.38;
+}
+
+.stats-study-cal-cell--today {
+    box-shadow: inset 0 0 0 2px var(--mocha);
+}
+
+.stats-study-cal-cell__day {
+    font-size: 0.625rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1;
+}
+
+.stats-study-cal-cell__hrs {
+    font-size: 0.5rem;
+    font-weight: 800;
+    color: var(--mocha);
+    line-height: 1;
+    letter-spacing: 0.02em;
+}
+
+:root[data-theme="dark"] .stats-study-cal-cell__day {
+    color: var(--text-main);
+}
+
+:root[data-theme="dark"] .stats-study-cal-cell__hrs {
+    color: var(--latte);
 }
 
 /* ========================================
@@ -2713,9 +2901,17 @@ h6 {
         height: 120px !important;
     }
 
-    /* Heatmap: smaller cells */
-    #heatmap-grid {
+    /* Stats study calendar: compact cells */
+    .stats-study-cal-grid {
         gap: 3px !important;
+    }
+
+    .stats-study-cal-cell {
+        min-height: 2rem;
+    }
+
+    .stats-study-cal-cell__hrs {
+        font-size: 0.45rem;
     }
 
     .start-hour-bars {
