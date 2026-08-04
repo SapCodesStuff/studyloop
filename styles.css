@@ -3532,3 +3532,1320 @@ h6 {
     background: rgba(192, 57, 43, 0.06);
     border-color: var(--accent-red);
 }
+
+/* ========================================
+   Study Garden Styles
+   ======================================== */
+.wilted-plant {
+    filter: grayscale(65%) sepia(45%) saturate(55%) brightness(82%) contrast(95%);
+    transform-origin: bottom center;
+    transform: rotate(3deg) translateY(1.5px);
+    transition: filter 0.5s ease, transform 0.5s ease;
+}
+
+/* =============================================
+   STUDY FARM — tropical ocean island game UI
+   ============================================= */
+
+.garden-game-view {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    /* Must match SVG ocean fill so letterboxing never shows a seam */
+    background: #3a9ec4;
+}
+
+.garden-game-view.is-night {
+    background: #0a1830;
+}
+
+.garden-game-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    font-family: 'VT323', monospace;
+    color: #f0f8ff;
+    image-rendering: pixelated;
+}
+
+/* ---- Game HUD ---- */
+.game-hud {
+    flex-shrink: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.45rem 0.75rem;
+    background:
+        linear-gradient(180deg, rgba(28, 72, 92, 0.88) 0%, rgba(22, 58, 78, 0.92) 100%);
+    border-bottom: 2px solid rgba(180, 220, 230, 0.28);
+    box-shadow: 0 4px 18px rgba(20, 50, 70, 0.22);
+    backdrop-filter: blur(8px);
+    z-index: 5;
+}
+
+.game-hud__brand {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+}
+
+.game-hud__icon {
+    font-size: 1.75rem;
+    line-height: 1;
+    filter: drop-shadow(0 2px 4px rgba(0, 40, 60, 0.5));
+}
+
+.game-hud__title {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(0.55rem, 2vw, 0.7rem);
+    line-height: 1.5;
+    color: #e8f8ff;
+    text-shadow: 2px 2px 0 #0a3048;
+    letter-spacing: 0.02em;
+}
+
+.game-hud__tagline {
+    font-size: 1rem;
+    color: #9ed4ec;
+    margin-top: 0.15rem;
+    opacity: 0.95;
+}
+
+.game-hud__wallet {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.game-hud__coin {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.65rem;
+    background: rgba(6, 30, 48, 0.75);
+    border: 2px solid rgba(120, 210, 240, 0.35);
+    box-shadow: 0 2px 8px rgba(0, 20, 40, 0.3);
+    border-radius: 6px;
+}
+
+.game-hud__coin-icon {
+    font-size: 1.1rem;
+    color: #ffd54f;
+    text-shadow: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.game-hud__coin-icon svg {
+    display: block;
+}
+
+.game-hud__coin--partner .game-hud__coin-icon {
+    color: #ff8a80;
+}
+
+.game-hud__coin-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.game-hud__coin-label {
+    font-size: 0.85rem;
+    color: #8ab8d0;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.game-hud__coin-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #e8f8ff;
+    font-variant-numeric: tabular-nums;
+}
+
+.game-hud__status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.6rem;
+    background: rgba(0, 20, 40, 0.45);
+    border: 2px solid rgba(100, 190, 220, 0.3);
+    border-radius: 6px;
+    font-size: 1rem;
+    color: #a8d4e8;
+}
+
+.game-hud__status-dot {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+    background: #666;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px #0a3048;
+}
+
+.game-hud__status-dot--online {
+    background: #4caf50;
+    box-shadow: 0 0 6px #4caf50;
+}
+
+.game-hud__status-dot--connecting {
+    background: #ffb300;
+    animation: game-pulse 1s ease-in-out infinite;
+}
+
+.game-hud__status-dot--offline {
+    background: #e53935;
+}
+
+@keyframes game-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+/* ---- Game viewport: full-bleed ocean, no framed box ---- */
+.game-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    /* Same solid as SVG ocean — eliminates the rectangular seam when zoomed out */
+    background: #3a9ec4;
+    position: relative;
+    overflow: hidden;
+}
+
+.garden-game-view.is-night .game-viewport {
+    background: #0a1830;
+}
+
+.game-viewport__frame {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    aspect-ratio: auto;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    overflow: hidden;
+    touch-action: none;
+}
+
+.game-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+    image-rendering: auto;
+    touch-action: none;
+    user-select: none;
+}
+
+.game-canvas.is-panning {
+    cursor: grabbing;
+}
+
+.game-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 55, 90, 0.78);
+    z-index: 10;
+    transition: opacity 0.3s ease;
+}
+
+.game-loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+    display: none !important;
+}
+
+.game-loading-overlay__text {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.65rem;
+    color: #e8f8ff;
+    text-shadow: 2px 2px 0 #0a3048;
+    animation: game-pulse 1.2s ease-in-out infinite;
+}
+
+.game-tooltip-box {
+    flex-shrink: 0;
+    width: 100%;
+    padding: 0.55rem 0.85rem;
+    font-size: 1.05rem;
+    line-height: 1.35;
+    color: #0a3048;
+    background: rgba(232, 248, 255, 0.94);
+    border: 2px solid rgba(30, 100, 140, 0.45);
+    box-shadow: 0 4px 16px rgba(0, 40, 70, 0.25);
+    border-radius: 8px;
+    min-height: 2.4rem;
+}
+
+.game-tooltip-box--overlay {
+    position: absolute;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    width: auto;
+    z-index: 5;
+    opacity: 0.92;
+    font-size: 0.95rem;
+    padding: 0.4rem 0.65rem;
+    min-height: 0;
+    pointer-events: none;
+}
+
+/* ---- Slim hotbar + Minecraft inventory ---- */
+.game-hotbar--slim {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.4rem 0.75rem;
+    background:
+        linear-gradient(0deg, rgba(22, 58, 78, 0.96) 0%, rgba(28, 72, 92, 0.9) 100%);
+    border-top: 2px solid rgba(180, 220, 230, 0.28);
+    box-shadow: 0 -4px 18px rgba(20, 50, 70, 0.22);
+    z-index: 5;
+}
+
+.game-hotbar__selected {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+}
+
+.game-hotbar__selected-slot {
+    width: 3.25rem;
+    height: 3.25rem;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(6, 30, 48, 0.85);
+    border: 2px solid rgba(180, 210, 140, 0.55);
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    position: relative;
+    overflow: hidden;
+}
+
+.game-hotbar__selected-slot img {
+    width: 2.35rem;
+    height: 2.35rem;
+    object-fit: contain;
+    image-rendering: auto;
+}
+
+.game-hotbar__selected-empty {
+    font-size: 0.7rem;
+    color: #7aa0b4;
+}
+
+.game-hotbar__selected-cost {
+    position: absolute;
+    right: 2px;
+    bottom: 1px;
+    font-size: 0.65rem;
+    color: #ffd54f;
+    text-shadow: 0 1px 2px #0a2030;
+}
+
+.game-hotbar__selected-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.game-hotbar__selected-name {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.48rem;
+    color: #e8f8ff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.game-hotbar__actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.game-hotbar__inv-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.75rem;
+    background: rgba(6, 30, 48, 0.85);
+    border: 2px solid rgba(180, 210, 140, 0.5);
+    border-radius: 6px;
+    color: #e8f8ff;
+    font-family: 'VT323', monospace;
+    font-size: 1.05rem;
+    cursor: pointer;
+}
+
+.game-hotbar__inv-btn:hover {
+    border-color: #ffd54f;
+    color: #ffd54f;
+}
+
+.game-shop-open,
+.game-time-toggle {
+    position: absolute;
+    z-index: 15;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    min-width: 38px;
+    height: 38px;
+    padding: 0 0.55rem;
+    background: rgba(8, 40, 65, 0.85);
+    border: 2px solid rgba(120, 210, 240, 0.4);
+    box-shadow: 0 2px 10px rgba(0, 30, 50, 0.4);
+    border-radius: 8px;
+    color: #e8f8ff;
+    cursor: pointer;
+    font-family: 'VT323', monospace;
+    font-size: 0.95rem;
+}
+
+.game-shop-open {
+    left: 10px;
+    bottom: 56px;
+}
+
+.game-time-toggle {
+    left: 56px;
+    bottom: 10px;
+}
+
+.game-time-toggle--night {
+    border-color: rgba(200, 180, 255, 0.45);
+    background: rgba(20, 24, 55, 0.88);
+}
+
+.game-time-toggle__icon {
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+}
+
+/* Floating Minecraft-like inventory */
+.mc-shop {
+    position: absolute;
+    top: 12%;
+    right: 12%;
+    width: min(320px, 86vw);
+    height: min(380px, 62vh);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, #3d2e22 0%, #2a1f16 100%);
+    border: 3px solid #1a1208;
+    box-shadow:
+        inset 0 0 0 2px #8b6914,
+        0 12px 32px rgba(0, 20, 40, 0.55);
+    border-radius: 4px;
+    color: #f5f0dc;
+    font-family: 'VT323', monospace;
+    overflow: hidden;
+    touch-action: none;
+}
+
+.mc-shop.hidden {
+    display: none !important;
+}
+
+.mc-shop--dragging {
+    opacity: 0.95;
+    cursor: grabbing;
+}
+
+.mc-shop__titlebar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.55rem;
+    background: linear-gradient(180deg, #5c4030 0%, #3d2a1e 100%);
+    border-bottom: 2px solid #1a1208;
+    cursor: grab;
+    user-select: none;
+}
+
+.mc-shop__title {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.48rem;
+    color: #fff8e7;
+    text-shadow: 1px 1px 0 #1a1208;
+}
+
+.mc-shop__pts {
+    margin-left: auto;
+    font-size: 1rem;
+    color: #ffd54f;
+}
+
+.mc-shop__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: #2a1f14;
+    border: 2px solid #1a1208;
+    color: #e8d4a8;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.mc-shop__close:hover {
+    color: #ff8a80;
+}
+
+.mc-shop__tabs {
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    padding: 0.35rem;
+    background: #1a1208;
+}
+
+.mc-shop__tab {
+    padding: 0.35rem 0.15rem;
+    background: #3d2e22;
+    border: 2px solid #2a1f14;
+    color: #c8b898;
+    font-family: 'VT323', monospace;
+    font-size: 0.95rem;
+    cursor: pointer;
+}
+
+.mc-shop__tab.selected {
+    background: #5c4030;
+    border-color: #ffd54f;
+    color: #fff8e7;
+}
+
+.mc-shop__grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.35rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.25);
+    scrollbar-width: thin;
+}
+
+.mc-shop__slot {
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.1rem;
+    padding: 0.25rem;
+    background: #2a1f14;
+    border: 2px solid #1a1208;
+    box-shadow: inset 0 0 0 1px #5c4030;
+    cursor: pointer;
+    position: relative;
+}
+
+.mc-shop__slot:hover:not(.disabled) {
+    border-color: #c8a060;
+}
+
+.mc-shop__slot.selected {
+    border-color: #ffd54f;
+    box-shadow: inset 0 0 0 1px #ffd54f, 0 0 0 1px #8b6914;
+    background: #3d2e1a;
+}
+
+.mc-shop__slot.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    filter: grayscale(0.5);
+}
+
+.mc-shop__slot-icon {
+    width: 2rem;
+    height: 2rem;
+    object-fit: contain;
+}
+
+.mc-shop__slot-cost {
+    font-size: 0.75rem;
+    color: #ffd54f;
+    line-height: 1;
+}
+
+.mc-shop__slot-name {
+    font-size: 0.7rem;
+    color: #c8b898;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1;
+}
+
+.mc-shop__hint {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.9rem;
+    color: #c8b898;
+    background: #1a1208;
+    border-top: 2px solid #3d2e22;
+}
+
+.game-decor-sprite--glow image {
+    /* Soft orange bloom handled by SVG filter — keep CSS filter off to avoid double-hard edges */
+}
+
+.game-path-connector {
+    opacity: 0.95;
+}
+
+/* ---- Bottom hotbar (legacy slots kept for compat) ---- */
+.game-hotbar {
+    flex-shrink: 0;
+    padding: 0.35rem 0.65rem 0.5rem;
+    background:
+        linear-gradient(0deg, rgba(22, 58, 78, 0.94) 0%, rgba(28, 72, 92, 0.88) 100%);
+    border-top: 2px solid rgba(180, 220, 230, 0.28);
+    box-shadow: 0 -4px 18px rgba(20, 50, 70, 0.22);
+    z-index: 5;
+}
+
+.game-hotbar__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+    padding: 0 0.15rem;
+}
+
+.game-hotbar__label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    color: #e8f8ff;
+    text-shadow: 1px 1px 0 #0a3048;
+}
+
+.game-hotbar__hint {
+    font-size: 0.95rem;
+    color: #9ed4ec;
+}
+
+.game-hotbar__slots {
+    display: flex;
+    gap: 0.45rem;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    scrollbar-width: thin;
+}
+
+.game-hotbar-slot {
+    flex: 0 0 auto;
+    width: 4.75rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.35rem 0.25rem 0.4rem;
+    background: rgba(6, 30, 48, 0.8);
+    border: 2px solid rgba(120, 210, 240, 0.3);
+    box-shadow: 0 2px 8px rgba(0, 20, 40, 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
+    position: relative;
+}
+
+.game-hotbar-slot:hover:not(.disabled) {
+    transform: translateY(-2px);
+    border-color: rgba(160, 230, 255, 0.55);
+    box-shadow: 0 4px 12px rgba(0, 40, 70, 0.4);
+}
+
+.game-hotbar-slot.selected {
+    border-color: #ffd54f;
+    box-shadow:
+        0 0 0 2px rgba(255, 213, 79, 0.35),
+        0 2px 10px rgba(0, 20, 40, 0.4);
+    background: rgba(20, 50, 70, 0.9);
+}
+
+.game-hotbar-slot.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.6);
+}
+
+.game-hotbar-slot__icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(4, 22, 36, 0.85);
+    border: 2px solid rgba(80, 160, 190, 0.35);
+    border-radius: 6px;
+}
+
+.game-hotbar-slot__icon img {
+    width: 2rem;
+    height: 2rem;
+    object-fit: contain;
+    image-rendering: pixelated;
+}
+
+.game-hotbar-slot__icon--asset {
+    overflow: hidden;
+}
+
+.game-hotbar-slot__icon--asset img {
+    width: 2.35rem;
+    height: 2.35rem;
+    object-fit: cover;
+    object-position: center 70%;
+    image-rendering: auto;
+    transform: scale(1.15);
+}
+
+.game-hotbar-slot__cost {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #ffd54f;
+    text-shadow: 1px 1px 0 #0a3048;
+}
+
+.game-hotbar-slot__name {
+    font-size: 0.75rem;
+    color: #9ed4ec;
+    text-align: center;
+    line-height: 1.1;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---- SVG scene elements ---- */
+.game-scene-island {
+    pointer-events: none;
+}
+
+.game-scene-island image {
+    image-rendering: auto;
+}
+
+.game-plot-tile {
+    cursor: pointer;
+}
+
+/* Invisible hex grid — glows on hover only */
+.game-plot-tile__hit {
+    fill: transparent;
+    stroke: transparent;
+    stroke-width: 0;
+    transition: fill 0.15s ease, stroke 0.15s ease, filter 0.15s ease;
+}
+
+.game-plot-tile__plant-hit {
+    fill: transparent;
+    stroke: transparent;
+    pointer-events: all;
+}
+
+.game-plot-tile:hover .game-plot-tile__hit {
+    fill: rgba(255, 230, 120, 0.45);
+    stroke: rgba(255, 248, 200, 0.85);
+    stroke-width: 2;
+    filter: url(#game-soil-glow);
+}
+
+.game-plot-tile--selected:hover .game-plot-tile__hit {
+    fill: rgba(170, 255, 130, 0.42);
+    stroke: rgba(220, 255, 180, 0.9);
+}
+
+.game-plot-tile--decor-ok:hover .game-plot-tile__hit {
+    fill: rgba(140, 210, 255, 0.4);
+    stroke: rgba(200, 240, 255, 0.9);
+}
+
+.game-plot-tile--decor-blocked:hover .game-plot-tile__hit {
+    fill: rgba(220, 100, 100, 0.28);
+    stroke: rgba(255, 160, 160, 0.7);
+}
+
+.game-plot-tile--remove:hover .game-plot-tile__hit {
+    fill: rgba(255, 180, 100, 0.4);
+    stroke: rgba(255, 220, 160, 0.9);
+}
+
+.game-plot-tile--planted:hover .game-plot-tile__hit {
+    fill: rgba(255, 210, 100, 0.38);
+    stroke: rgba(255, 235, 170, 0.8);
+}
+
+.game-decor-sprite {
+    pointer-events: none;
+}
+
+.game-decor-sprite--ground {
+    opacity: 0.95;
+}
+
+.game-hud__chip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    line-height: 1;
+}
+
+.game-hud__chip-icon svg {
+    display: block;
+}
+
+.game-hotbar__slots--decor {
+    margin-bottom: 0.15rem;
+}
+
+.game-plant-sprite {
+    pointer-events: none;
+    image-rendering: pixelated;
+    transform-box: fill-box;
+    transform-origin: bottom center;
+}
+
+.game-growth-bar {
+    pointer-events: none;
+}
+
+.game-growth-bar__track {
+    fill: rgba(30, 55, 50, 0.55);
+    stroke: rgba(255, 255, 255, 0.35);
+    stroke-width: 0.8;
+}
+
+.game-growth-bar__fill {
+    transition: width 0.4s ease;
+}
+
+.game-growth-bar--wilted .game-growth-bar__track {
+    fill: rgba(80, 55, 30, 0.55);
+}
+
+.game-growth-bar__label {
+    fill: #fff8e8;
+    font-family: 'VT323', monospace;
+    font-size: 11px;
+    text-anchor: middle;
+    paint-order: stroke fill;
+    stroke: rgba(20, 50, 60, 0.65);
+    stroke-width: 2.5px;
+    stroke-linejoin: round;
+}
+
+.game-plant-sprite--asset {
+    image-rendering: auto;
+}
+
+.wilted-plant {
+    filter: grayscale(70%) sepia(40%) brightness(75%);
+    transform-origin: center bottom;
+}
+
+.game-owner-badge {
+    pointer-events: none;
+}
+
+.game-owner-badge__bg {
+    fill: #3d5a4a;
+    stroke: #f0e0a8;
+    stroke-width: 1.5;
+    rx: 3;
+}
+
+.game-owner-badge__text {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    fill: #fff8e7;
+    text-anchor: middle;
+    dominant-baseline: central;
+}
+
+/* ---- Game toast ---- */
+.game-toast {
+    position: fixed;
+    top: 5.5rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    z-index: 999;
+    padding: 0.65rem 1rem;
+    font-family: 'VT323', monospace;
+    font-size: 1.15rem;
+    color: #fff8e7;
+    background: #2a1f14;
+    border: 3px solid #3d2814;
+    box-shadow: 0 4px 0 #1a1208, inset 0 0 0 1px #8b6914;
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: none;
+    max-width: calc(100vw - 2rem);
+    text-align: center;
+}
+
+.game-toast--visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.game-toast--success {
+    border-color: #2e7d32;
+    box-shadow: 0 4px 0 #1b5e20, inset 0 0 0 1px #66bb6a;
+}
+
+.game-toast--error {
+    border-color: #c62828;
+    box-shadow: 0 4px 0 #8e0000, inset 0 0 0 1px #ef5350;
+}
+
+.game-toast--warning {
+    border-color: #f57f17;
+    box-shadow: 0 4px 0 #e65100, inset 0 0 0 1px #ffb300;
+}
+
+/* ---- Immersive game mode (hide app chrome feel) ---- */
+body.game-view-active main {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+body.game-view-active #marketplace-view {
+    flex: 1;
+    min-height: 0;
+}
+
+body.game-view-active .app-header.game-view-header {
+    background: rgba(8, 40, 65, 0.95);
+    border-bottom-color: rgba(100, 200, 230, 0.35);
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+}
+
+body.game-view-active .app-header.game-view-header .nav-pill {
+    color: #9ed4ec;
+}
+
+body.game-view-active .app-header.game-view-header .nav-pill.active {
+    color: #e8f8ff;
+    background: rgba(126, 211, 252, 0.18);
+}
+
+@media (max-width: 640px) {
+    .game-hud__wallet {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .game-hud__status {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .game-hotbar-slot {
+        width: 4.25rem;
+    }
+
+    .game-hud__title {
+        font-size: 0.5rem;
+    }
+}
+
+/* Legacy garden classes kept for SVG compat — overridden by game styles above */
+.garden-plot-rect,
+.garden-plot-soil,
+.shop-seed-card {
+    /* unused in new renderer */
+}
+
+/* =============================================
+   Garden game v2 — weather/level chips, quests
+   panel, tools, duo focus, nudge
+   ============================================= */
+
+/* ---- HUD chips (weather & garden level) ---- */
+.game-hud__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.game-hud__chip {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.65rem;
+    background: rgba(6, 30, 48, 0.75);
+    border: 2px solid rgba(120, 210, 240, 0.35);
+    box-shadow: 0 2px 8px rgba(0, 20, 40, 0.3);
+    border-radius: 6px;
+    font-size: 1.05rem;
+    color: #e8f8ff;
+    font-family: 'VT323', monospace;
+    cursor: default;
+}
+
+.game-hud__chip-icon {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.game-hud__panel-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    background: rgba(6, 30, 48, 0.75);
+    border: 2px solid rgba(120, 210, 240, 0.35);
+    box-shadow: 0 2px 8px rgba(0, 20, 40, 0.3);
+    border-radius: 6px;
+    color: #ffd54f;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+}
+
+.game-hud__panel-toggle:hover {
+    transform: translateY(-1px);
+    color: #ffe082;
+}
+
+.game-hud__panel-toggle:active {
+    transform: translateY(1px);
+}
+
+/* ---- Camera reset ---- */
+.game-camera-reset {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 15;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    background: rgba(8, 40, 65, 0.85);
+    border: 2px solid rgba(120, 210, 240, 0.4);
+    box-shadow: 0 2px 10px rgba(0, 30, 50, 0.4);
+    border-radius: 8px;
+    color: #e8f8ff;
+    cursor: pointer;
+}
+
+.game-camera-reset:hover {
+    background: rgba(20, 70, 100, 0.92);
+    color: #ffd54f;
+}
+
+/* ---- Garden side panel (quests / level / status) ---- */
+.garden-side-panel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 14;
+    width: min(240px, 72vw);
+    max-height: calc(100% - 20px);
+    overflow-y: auto;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+.garden-side-panel--closed {
+    transform: translateX(calc(100% + 14px));
+    opacity: 0;
+    pointer-events: none;
+}
+
+.garden-side-panel__body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-family: 'VT323', monospace;
+}
+
+.garden-panel-card {
+    background: rgba(8, 40, 65, 0.9);
+    border: 2px solid rgba(120, 210, 240, 0.35);
+    box-shadow: 0 4px 16px rgba(0, 30, 50, 0.4);
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: #e8f8ff;
+}
+
+.garden-panel-card__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 1.05rem;
+    color: #7dd3fc;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+}
+
+.garden-panel-level-name {
+    font-size: 1.2rem;
+    color: #e8f8ff;
+    line-height: 1.1;
+}
+
+.garden-panel-sub {
+    font-size: 0.95rem;
+    color: #9ed4ec;
+    margin-top: 3px;
+    line-height: 1.15;
+}
+
+.garden-panel-bar {
+    height: 8px;
+    margin-top: 5px;
+    background: rgba(0, 20, 40, 0.55);
+    border: 1px solid rgba(80, 160, 190, 0.35);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.garden-panel-bar--sm {
+    height: 5px;
+    margin-top: 3px;
+}
+
+.garden-panel-bar__fill {
+    height: 100%;
+    background: linear-gradient(90deg, #8bc34a, #c0ca33);
+    box-shadow: 0 0 4px rgba(139, 195, 74, 0.8);
+    transition: width 0.4s ease;
+}
+
+/* ---- Quests ---- */
+.garden-quest-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.garden-quest {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 6px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(139, 105, 20, 0.55);
+}
+
+.garden-quest--done {
+    opacity: 0.62;
+    border-color: rgba(139, 195, 74, 0.6);
+}
+
+.garden-quest--done .garden-quest__text {
+    text-decoration: line-through;
+}
+
+.garden-quest__icon {
+    width: 1.35rem;
+    height: 1.35rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    background: rgba(100, 180, 200, 0.2);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #9ed4ec;
+}
+
+.garden-quest__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.garden-quest__text {
+    font-size: 1rem;
+    line-height: 1.05;
+    color: #e8f8ff;
+}
+
+.garden-quest__meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    flex-shrink: 0;
+    font-size: 0.95rem;
+    color: #c8b898;
+    line-height: 1.05;
+}
+
+.garden-quest__meta em {
+    font-style: normal;
+    color: #ffd54f;
+    font-weight: 700;
+}
+
+.garden-quest--done .garden-quest__meta {
+    color: #8bc34a;
+}
+
+/* ---- Farm status ---- */
+.garden-farm-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 1rem;
+    color: #e8f8ff;
+}
+
+/* ---- Hotbar stats strip & tools ---- */
+.game-hotbar__stats {
+    margin-left: auto;
+    margin-right: 0.75rem;
+    font-size: 1.05rem;
+    color: #9ed4ec;
+    font-variant-numeric: tabular-nums;
+}
+
+.game-hotbar__header--tools {
+    margin-top: 6px;
+}
+
+.game-hotbar__slots--tools {
+    padding-top: 2px;
+}
+
+.game-hotbar-slot--tool .game-hotbar-slot__icon--material {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.game-hotbar-slot__icon--material .material-symbols-outlined {
+    font-size: 1.9rem;
+    color: #a5d67e;
+    text-shadow: 1px 1px 0 #1a1208;
+}
+
+.game-hotbar-slot--tool.selected .material-symbols-outlined {
+    color: #ffd54f;
+}
+
+/* ---- Plant hover wiggle (static otherwise) ---- */
+.game-plot-tile--planted:hover .game-plant-sprite {
+    animation: game-plant-wiggle 0.42s linear;
+}
+
+@keyframes game-plant-wiggle {
+    0%   { transform: rotate(0deg); }
+    12%  { transform: rotate(-8deg); }
+    24%  { transform: rotate(7deg); }
+    38%  { transform: rotate(-6deg); }
+    52%  { transform: rotate(5deg); }
+    68%  { transform: rotate(-3deg); }
+    82%  { transform: rotate(2deg); }
+    100% { transform: rotate(0deg); }
+}
+
+/* ---- Butterflies ---- */
+.game-butterfly {
+    pointer-events: none;
+    filter: drop-shadow(1px 1px 0 rgba(26, 18, 8, 0.35));
+}
+
+/* ---- Duo focus badge (presence card) ---- */
+.presence-card__duo {
+    margin-top: 6px;
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+    background: linear-gradient(90deg, rgba(230, 126, 34, 0.16), rgba(230, 126, 34, 0.28));
+    border: 1px solid rgba(230, 126, 34, 0.45);
+    color: var(--accent-amber, #c97b1e);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    animation: duo-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes duo-glow {
+    0%, 100% { box-shadow: 0 0 0 rgba(230, 126, 34, 0); }
+    50% { box-shadow: 0 0 10px rgba(230, 126, 34, 0.45); }
+}
+
+/* ---- Partner nudge button ---- */
+.presence-card__nudge {
+    margin-top: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-coffee);
+    background: var(--surface-panel);
+    color: var(--mocha);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.2s ease;
+}
+
+.presence-card__nudge:hover {
+    background: var(--mocha);
+    color: var(--milk-foam);
+    transform: translateY(-1px);
+}
+
+.presence-card__nudge:disabled {
+    opacity: 0.5;
+    cursor: default;
+    transform: none;
+}

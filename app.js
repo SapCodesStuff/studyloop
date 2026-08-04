@@ -116,6 +116,10 @@ let partnerSessionDurationSeconds = 0;
 let partnerSessionHeartbeatMs = null;
 /** Partner session started_at as epoch ms (null if idle) */
 let partnerSessionStartedMs = null;
+/** Whether the partner's active session is paused */
+let partnerSessionPaused = false;
+/** Monotonic token so older checkPartnerSession fetches cannot overwrite newer state */
+let partnerSessionCheckGen = 0;
 /** Completed session seconds for partner for local calendar day (excludes live active session) */
 let partnerTodayCompletedSum = 0;
 /** Partner's last_app_activity_at as epoch ms (0 = unknown) */
@@ -124,6 +128,11 @@ let studySegmentStartMs = null;
 let pausedAccumulatedSeconds = 0;
 let appPresenceIntervalId = null;
 let partnerProfilePollIntervalId = null;
+let partnerSessionsChannel = null;
+/** Dedupes concurrent partner session refreshes from poll / realtime / visibility. */
+let checkPartnerSessionPromise = null;
+/** Prevents realtime reconnect storms when the channel flaps. */
+let partnerRealtimeReconnectTimer = null;
 let currentSessionId = null;
 let calendarRealtimeChannel = null;
 let chatRealtimeChannel = null;
@@ -143,7 +152,26 @@ let todoSyncGen = 0;
 /** Completed focus seconds today (local day), from DB — excludes in-progress session. */
 let myTodayCompletedFromDb = 0;
 
+/** garden_game.js runs as a plain script and reads shared state from window. */
+function syncWindowAppState() {
+    window.sb = sb;
+    window.currentUser = currentUser;
+    window.userProfile = userProfile;
+    window.partnerProfile = partnerProfile;
+}
+
+/** Live + completed focus seconds today — used by garden daily quests. */
+window.getMyTodayFocusSeconds = function () {
+    let live = 0;
+    if (currentSessionId && (timerState === 'studying' || timerState === 'paused')) {
+        live = getLiveStudyElapsedSeconds();
+    }
+    return myTodayCompletedFromDb + live;
+};
+
 const PARTNER_LIVE_MS = 90 * 1000;
+/** Partner studying UI expires if no fresh heartbeat (background tabs throttle intervals). */
+const PARTNER_SESSION_STALE_MS = 5 * 60 * 1000;
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * 130; // ~816.81
 
 // =============================================
@@ -164,6 +192,7 @@ function applyTheme(dark) {
 }
 
 async function init() {
+    syncWindowAppState();
     initTheme();
     setupNav();
     setupAuth();
@@ -174,6 +203,7 @@ async function init() {
     setupFocusLogsToggle();
     setupFocusLogEditModal();
     setupStatsStudyCalNav();
+    if (window.GardenGame) window.GardenGame.init();
 
     // Check if user is already logged in
     const { data: { session } } = await sb.auth.getSession();
@@ -190,16 +220,21 @@ async function init() {
             currentUser = null;
             userProfile = null;
             clearDashboardIntervalsAndPresence();
+            syncWindowAppState();
             showAuth();
         }
     });
 
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState !== 'visible') return;
-        if (timerState === 'studying') refreshStudyTimerUI();
+        if (timerState === 'studying' || timerState === 'paused') {
+            refreshStudyTimerUI();
+            sendSessionHeartbeat();
+        }
         tickPartnerUI();
         sendAppPresencePing();
         if (currentUser) {
+            checkPartnerSession();
             syncTodayTodoList();
             const cal = document.getElementById('calendar-view');
             if (cal && !cal.classList.contains('hidden')) renderCalendarView();
@@ -308,8 +343,10 @@ async function showApp() {
 }
 
 async function onLoginSuccess() {
+    syncWindowAppState();
     // Fetch user profile from public.users
     await fetchUserProfile();
+    await backfillTaskPointsIfNeeded();
     showApp();
 
     // Clean up any stale sessions left by this user (e.g. closed browser without stopping timer)
@@ -321,6 +358,10 @@ async function onLoginSuccess() {
     await loadChatHistory();
     await loadStats();
     await loadPartner();
+    syncWindowAppState();
+    if (partnerProfile && window.GardenGame) {
+        window.GardenGame.start();
+    }
     startAppPresenceLoop();
     setupStatsToggle();
     subscribeCalendarTasksRealtime();
@@ -347,6 +388,7 @@ async function fetchUserProfile() {
 
     if (!error && data) {
         userProfile = data;
+        syncWindowAppState();
         // Update UI with real user info
         const initial = (data.display_name || 'U').charAt(0).toUpperCase();
         headerInitial.textContent = initial;
@@ -355,6 +397,30 @@ async function fetchUserProfile() {
         const pts = document.getElementById('stat-points');
         if (pts) pts.textContent = data.total_task_points ?? 0;
     }
+}
+
+/** One-time sync when total_task_points was never populated for existing study history. */
+async function backfillTaskPointsIfNeeded() {
+    if (!currentUser || !userProfile) return;
+    const stored = Number(userProfile.total_task_points) || 0;
+    if (stored > 0) return;
+
+    const sessions = await fetchAllCompletedSessions(currentUser.id);
+    const earned = sessions.reduce((sum, s) => sum + studyPointsForSeconds(s.duration_seconds), 0);
+    if (earned <= 0) return;
+
+    const { error } = await sb
+        .from('users')
+        .update({ total_task_points: earned })
+        .eq('id', currentUser.id);
+    if (error) {
+        console.warn('Points backfill failed:', error.message);
+        return;
+    }
+    userProfile.total_task_points = earned;
+    syncWindowAppState();
+    const pts = document.getElementById('stat-points');
+    if (pts) pts.textContent = earned;
 }
 
 function renderExamCountdown(profile) {
@@ -504,11 +570,13 @@ async function recoverActiveSession(activeData) {
         timerSeconds = pausedAccumulatedSeconds;
         myPresenceDot.className = 'presence-dot online';
         refreshStudyTimerUI();
+        sendSessionHeartbeat();
         return;
     }
 
     studySegmentStartMs = new Date(activeData.last_heartbeat_at || activeData.started_at).getTime();
     await startTimer(true);
+    sendSessionHeartbeat();
 }
 
 async function loadChatHistory() {
@@ -600,6 +668,8 @@ function setupNav() {
             el.classList.toggle('hidden', id !== viewId);
         });
         dashboardFooter.classList.toggle('hidden', viewId !== 'dashboard-view');
+        document.body.classList.toggle('game-view-active', viewId === 'marketplace-view');
+        document.getElementById('app-header')?.classList.toggle('game-view-header', viewId === 'marketplace-view');
         navPills.forEach(p => {
             p.classList.toggle('active', p.dataset.view === viewId);
         });
@@ -614,7 +684,10 @@ function setupNav() {
             if (selectedRadio && selectedRadio.value === 'partner' && partnerProfile) {
                 // Re-fetch partner profile for fresh data
                 sb.from('users').select('*').eq('id', partnerProfile.id).maybeSingle().then(({ data }) => {
-                    if (data) partnerProfile = data;
+                    if (data) {
+                        partnerProfile = data;
+                        syncWindowAppState();
+                    }
                     loadStatsFor(partnerProfile.id, partnerProfile);
                 });
             } else {
@@ -628,6 +701,10 @@ function setupNav() {
 
         if (viewId === 'dashboard-view' && currentUser && userProfile) {
             refreshFooterTodayProgress();
+        }
+
+        if (viewId === 'marketplace-view' && currentUser && partnerProfile && window.GardenGame) {
+            window.GardenGame.start();
         }
 
         requestAnimationFrame(() => requestAnimationFrame(syncNavSliders));
@@ -896,6 +973,7 @@ function setupSettings() {
             await sb.auth.signOut();
             currentUser = null;
             userProfile = null;
+            syncWindowAppState();
             showAuth();
         });
     }
@@ -971,6 +1049,14 @@ function clearDashboardIntervalsAndPresence() {
         clearInterval(partnerTimerInterval);
         partnerTimerInterval = null;
     }
+    if (partnerSessionsChannel) {
+        sb.removeChannel(partnerSessionsChannel);
+        partnerSessionsChannel = null;
+    }
+    if (partnerRealtimeReconnectTimer) {
+        clearTimeout(partnerRealtimeReconnectTimer);
+        partnerRealtimeReconnectTimer = null;
+    }
     if (calendarRealtimeChannel) {
         sb.removeChannel(calendarRealtimeChannel);
         calendarRealtimeChannel = null;
@@ -979,6 +1065,7 @@ function clearDashboardIntervalsAndPresence() {
     studySegmentStartMs = null;
     pausedAccumulatedSeconds = 0;
     partnerProfile = null;
+    syncWindowAppState();
     partnerSessionDurationSeconds = 0;
     partnerSessionHeartbeatMs = null;
     partnerSessionPaused = false;
@@ -986,6 +1073,7 @@ function clearDashboardIntervalsAndPresence() {
     partnerLastActivityAtMs = 0;
     focusLogsExpanded = false;
     myTodayCompletedFromDb = 0;
+    if (window.GardenGame) window.GardenGame.stop();
     const myTodayEl = document.getElementById('my-card-today');
     if (myTodayEl) myTodayEl.textContent = 'Today: —';
 }
@@ -1013,6 +1101,19 @@ function getLiveStudyElapsedSeconds() {
     if (timerState === 'paused') return pausedAccumulatedSeconds;
     if (!studySegmentStartMs) return pausedAccumulatedSeconds;
     return pausedAccumulatedSeconds + Math.floor((Date.now() - studySegmentStartMs) / 1000);
+}
+
+/** Push current study progress + heartbeat so partners don't falsely see idle. */
+function sendSessionHeartbeat() {
+    if (!currentSessionId || !currentUser) return;
+    if (timerState !== 'studying' && timerState !== 'paused') return;
+    const duration = getLiveStudyElapsedSeconds();
+    sb.from('sessions').update({
+        last_heartbeat_at: new Date().toISOString(),
+        duration_seconds: duration,
+        is_paused: timerState === 'paused',
+        is_active: true,
+    }).eq('id', currentSessionId).then(() => { });
 }
 
 function refreshStudyTimerUI() {
@@ -1114,6 +1215,9 @@ async function startTimer(recovering = false) {
                 user_id: currentUser.id,
                 subject: currentSubject,
                 is_active: true,
+                is_paused: false,
+                duration_seconds: 0,
+                last_heartbeat_at: new Date().toISOString(),
             })
             .select()
             .single();
@@ -1151,6 +1255,7 @@ function pauseTimer() {
     if (currentSessionId && currentUser) {
         sb.from('sessions').update({
             is_paused: true,
+            is_active: true,
             duration_seconds: pausedAccumulatedSeconds,
             last_heartbeat_at: new Date().toISOString(),
         }).eq('id', currentSessionId).then(() => { });
@@ -1168,7 +1273,9 @@ function resumeTimer() {
     if (currentSessionId && currentUser) {
         sb.from('sessions').update({
             is_paused: false,
+            is_active: true,
             last_heartbeat_at: new Date().toISOString(),
+            duration_seconds: getLiveStudyElapsedSeconds(),
         }).eq('id', currentSessionId).then(() => { });
     }
 }
@@ -1219,19 +1326,37 @@ async function stopTimer() {
     myStatusPill.style.border = '1px solid var(--border-coffee)';
     myPresenceDot.className = 'presence-dot online';
     timerSeconds = 0;
+    updateDuoBadge();
 }
 
 function tickTimer() {
     refreshStudyTimerUI();
+    updateDuoBadge();
 
-    // Heartbeat every 30 seconds while actively studying
+    // Heartbeat every 30 seconds while actively studying (re-assert is_active so false remote deactivations heal)
     if (timerState === 'studying' && timerSeconds > 0 && timerSeconds % 30 === 0 && currentSessionId && currentUser) {
-        sb.from('sessions').update({
-            last_heartbeat_at: new Date().toISOString(),
-            duration_seconds: timerSeconds,
-            is_paused: false,
-        }).eq('id', currentSessionId).then(() => { });
+        sendSessionHeartbeat();
     }
+
+    // Duo focus bonus: +2 pts for every 10 minutes both partners study together
+    if (timerState === 'studying' && timerSeconds > 0 && timerSeconds % 600 === 0 && isDuoFocusActive()) {
+        adjustUserTaskPoints(2).then(() => {
+            if (window.GardenGame) window.GardenGame.toast('🔥 Duo focus bonus! +2 pts for studying together', 'success');
+        });
+    }
+}
+
+/** True when both you and your partner are actively studying right now. */
+function isDuoFocusActive() {
+    if (timerState !== 'studying') return false;
+    if (partnerSessionHeartbeatMs == null || partnerSessionPaused) return false;
+    return (Date.now() - partnerSessionHeartbeatMs) < PARTNER_SESSION_STALE_MS;
+}
+
+function updateDuoBadge() {
+    const badge = document.getElementById('duo-bonus-badge');
+    if (!badge) return;
+    badge.classList.toggle('hidden', !isDuoFocusActive());
 }
 
 function formatTime(totalSeconds) {
@@ -1577,6 +1702,27 @@ function setupChat() {
     if (headerChatBtn) headerChatBtn.addEventListener('click', toggleChatPanel);
     if (minimizeChatBtn) minimizeChatBtn.addEventListener('click', () => setChatOpen(false));
 
+    // Partner nudge — sends a preset poke into the shared chat (60s cooldown)
+    const nudgeBtn = document.getElementById('partner-nudge-btn');
+    if (nudgeBtn && !nudgeBtn.dataset.bound) {
+        nudgeBtn.dataset.bound = '1';
+        nudgeBtn.addEventListener('click', async () => {
+            if (!currentUser || !partnerProfile) return;
+            const name = (userProfile?.display_name || 'Your partner').split(' ')[0];
+            const { error } = await sb.from('messages').insert({
+                sender_id: currentUser.id,
+                content: `👋 ${name} nudged you — time to study? 📚`,
+            });
+            if (error) {
+                if (window.GardenGame) window.GardenGame.toast('Could not send nudge.', 'error');
+                return;
+            }
+            if (window.GardenGame) window.GardenGame.toast('Nudge sent to your partner! 🔔', 'success');
+            nudgeBtn.disabled = true;
+            setTimeout(() => { nudgeBtn.disabled = false; }, 60000);
+        });
+    }
+
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = chatInput.value.trim();
@@ -1654,11 +1800,13 @@ async function fetchPartnerPresence() {
         .select('last_app_activity_at')
         .eq('id', partnerProfile.id)
         .maybeSingle();
-    if (error || !data) return;
-    partnerLastActivityAtMs = data.last_app_activity_at
-        ? new Date(data.last_app_activity_at).getTime()
-        : 0;
-    tickPartnerUI();
+    if (!error && data) {
+        partnerLastActivityAtMs = data.last_app_activity_at
+            ? new Date(data.last_app_activity_at).getTime()
+            : 0;
+    }
+    // Re-fetch session even if realtime missed a stop — prevents hours-long stale "studying"
+    await checkPartnerSession();
 }
 
 async function refreshPartnerTodayTotals() {
@@ -1754,12 +1902,15 @@ function applyPartnerSessionRow(sessionRow) {
 
 function tickPartnerUI() {
     if (!partnerProfile || !partnerCardToday) return;
+    // Keep showing last known elapsed while heartbeat is stale — do not wipe to 00:00:00.
+    // A real stop/deactivate comes from checkPartnerSession / realtime (is_active: false).
     if (partnerSessionHeartbeatMs != null) {
         partnerCardTimer.textContent = formatTime(getPartnerLiveElapsedSeconds());
     }
     const todayTotal = partnerTodayCompletedSum + partnerLiveSecondsForTodayTotal();
     partnerCardToday.textContent = `Today: ${formatDuration(todayTotal)}`;
     updatePartnerTabStatusUI();
+    updateDuoBadge();
 }
 
 async function loadPartner() {
@@ -1806,12 +1957,18 @@ async function loadPartner() {
     partnerAvatarLetter.textContent = initial;
     partnerCardName.textContent = partnerProfile.display_name || 'Partner';
     partnerCardName.classList.remove('presence-card__name--muted');
+    const nudgeBtn = document.getElementById('partner-nudge-btn');
+    if (nudgeBtn) nudgeBtn.classList.remove('hidden');
 
     // Check if partner has an active session
     await checkPartnerSession();
 
-    // Subscribe to partner session changes in real-time
-    sb.channel('partner-sessions')
+    // Subscribe to partner session changes in real-time (re-subscribe safely)
+    if (partnerSessionsChannel) {
+        sb.removeChannel(partnerSessionsChannel);
+        partnerSessionsChannel = null;
+    }
+    partnerSessionsChannel = sb.channel(`partner-sessions:${partnerProfile.id}`)
         .on('postgres_changes', {
             event: '*',
             schema: 'public',
@@ -1838,14 +1995,36 @@ async function loadPartner() {
                     .select('*')
                     .eq('id', partnerProfile.id)
                     .maybeSingle();
-                if (freshPartner) partnerProfile = freshPartner;
+                if (freshPartner) {
+                    partnerProfile = freshPartner;
+                    syncWindowAppState();
+                }
                 await loadStatsFor(partnerProfile.id, partnerProfile);
             }
         })
-        .subscribe();
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                checkPartnerSession();
+            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                console.warn('Partner sessions realtime issue:', status);
+                const dead = partnerSessionsChannel;
+                partnerSessionsChannel = null;
+                if (dead) {
+                    try { sb.removeChannel(dead); } catch (_) { /* ignore */ }
+                }
+                if (partnerRealtimeReconnectTimer) return;
+                partnerRealtimeReconnectTimer = setTimeout(() => {
+                    partnerRealtimeReconnectTimer = null;
+                    if (!partnerSessionsChannel && partnerProfile && currentUser) {
+                        loadPartner();
+                    }
+                }, 3000);
+            }
+        });
 
     startPartnerPoll();
     } finally {
+        syncWindowAppState();
         if (partnerLoading) partnerLoading.classList.add('hidden');
     }
 }
@@ -1853,55 +2032,75 @@ async function loadPartner() {
 async function checkPartnerSession() {
     if (!partnerProfile) return;
 
-    const { data: activeSession } = await sb
-        .from('sessions')
-        .select('*')
-        .eq('user_id', partnerProfile.id)
-        .eq('is_active', true)
-        .maybeSingle();
+    const gen = ++partnerSessionCheckGen;
+    const prev = checkPartnerSessionPromise;
 
-    if (partnerTimerInterval) {
-        clearInterval(partnerTimerInterval);
-        partnerTimerInterval = null;
-    }
+    const chained = (async () => {
+        if (prev) {
+            try { await prev; } catch (_) { /* ignore */ }
+        }
+        if (gen !== partnerSessionCheckGen) return;
 
-    let isActuallyStudying = false;
-    let sessionRow = activeSession;
+        const partnerId = partnerProfile?.id;
+        if (!partnerId) return;
 
-    if (activeSession) {
-        if (activeSession.is_paused) {
-            isActuallyStudying = true;
-        } else {
-            const heartbeat = new Date(activeSession.last_heartbeat_at).getTime();
-            const staleThreshold = 2 * 60 * 1000; // 2 minutes
+        const { data: activeSession } = await sb
+            .from('sessions')
+            .select('*')
+            .eq('user_id', partnerId)
+            .eq('is_active', true)
+            .maybeSingle();
 
-            if (Date.now() - heartbeat > staleThreshold) {
-                console.log('Detected stale partner session, marking as inactive...');
-                const dur = activeSession.duration_seconds || Math.floor(
-                    (new Date(activeSession.last_heartbeat_at).getTime() - new Date(activeSession.started_at).getTime()) / 1000
-                );
-                await sb.from('sessions').update({
-                    is_active: false,
-                    is_paused: false,
-                    ended_at: new Date(activeSession.last_heartbeat_at).toISOString(),
-                    duration_seconds: dur,
-                }).eq('id', activeSession.id);
-            } else {
+        if (gen !== partnerSessionCheckGen) return;
+
+        if (partnerTimerInterval) {
+            clearInterval(partnerTimerInterval);
+            partnerTimerInterval = null;
+        }
+
+        let isActuallyStudying = false;
+        const sessionRow = activeSession;
+
+        if (activeSession) {
+            if (activeSession.is_paused) {
                 isActuallyStudying = true;
+            } else {
+                // Prefer heartbeat; fall back to started_at (start insert always sets both now)
+                const heartbeatAt = activeSession.last_heartbeat_at || activeSession.started_at;
+                const heartbeat = new Date(heartbeatAt).getTime();
+
+                if (Number.isFinite(heartbeat) && Date.now() - heartbeat > PARTNER_SESSION_STALE_MS) {
+                    // Display-only: never deactivate another user's session from this client.
+                    // Owner's own cleanupStaleSessions / stopTimer owns is_active.
+                    isActuallyStudying = false;
+                } else {
+                    isActuallyStudying = true;
+                }
             }
         }
+
+        await refreshPartnerTodayTotals();
+
+        if (gen !== partnerSessionCheckGen) return;
+
+        if (isActuallyStudying && sessionRow) {
+            applyPartnerSessionRow(sessionRow);
+        } else {
+            renderPartnerIdleUI();
+        }
+
+        partnerTimerInterval = setInterval(tickPartnerUI, 1000);
+        tickPartnerUI();
+    })();
+
+    checkPartnerSessionPromise = chained;
+    try {
+        await chained;
+    } finally {
+        if (checkPartnerSessionPromise === chained) {
+            checkPartnerSessionPromise = null;
+        }
     }
-
-    await refreshPartnerTodayTotals();
-
-    if (isActuallyStudying && sessionRow) {
-        applyPartnerSessionRow(sessionRow);
-    } else {
-        renderPartnerIdleUI();
-    }
-
-    partnerTimerInterval = setInterval(tickPartnerUI, 1000);
-    tickPartnerUI();
 }
 
 // Clean up stale sessions for a user (e.g. from crashed browser)
@@ -1914,20 +2113,21 @@ async function cleanupStaleSessions(userId) {
 
     if (!staleSessions || staleSessions.length === 0) return;
 
-    const staleThreshold = 2 * 60 * 1000; // 2 minutes
     for (const session of staleSessions) {
         if (session.is_paused) continue;
-        const heartbeat = new Date(session.last_heartbeat_at).getTime();
-        if (Date.now() - heartbeat > staleThreshold) {
+        const heartbeatAt = session.last_heartbeat_at || session.started_at;
+        const heartbeat = new Date(heartbeatAt).getTime();
+        if (!Number.isFinite(heartbeat)) continue;
+        if (Date.now() - heartbeat > PARTNER_SESSION_STALE_MS) {
             console.log('Cleaning up stale own session:', session.id);
             const dur = session.duration_seconds || Math.floor(
-                (new Date(session.last_heartbeat_at).getTime() - new Date(session.started_at).getTime()) / 1000
+                (heartbeat - new Date(session.started_at).getTime()) / 1000
             );
             const { error: staleErr } = await sb.from('sessions').update({
                 is_active: false,
                 is_paused: false,
-                ended_at: new Date(session.last_heartbeat_at).toISOString(),
-                duration_seconds: dur,
+                ended_at: new Date(heartbeatAt).toISOString(),
+                duration_seconds: Math.max(0, dur),
             }).eq('id', session.id);
             if (!staleErr && userId === currentUser?.id && dur > 0) {
                 const pts = studyPointsForSeconds(dur);
@@ -1953,6 +2153,7 @@ function setupStatsToggle() {
                     .maybeSingle();
                 if (freshPartner) {
                     partnerProfile = freshPartner;
+                    syncWindowAppState();
                 }
                 await loadStatsFor(partnerProfile.id, partnerProfile);
             } else {
@@ -2623,8 +2824,13 @@ async function adjustUserTaskPoints(delta) {
         return;
     }
     userProfile.total_task_points = next;
+    syncWindowAppState();
     const pts = document.getElementById('stat-points');
     if (pts) pts.textContent = next;
+    if (window.GardenGame?.state?.isStarted) {
+        window.GardenGame.loadPoints();
+        window.GardenGame.setupShop();
+    }
 }
 
 /** 10 points per full hour of study time (proportional, rounded). */
