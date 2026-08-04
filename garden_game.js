@@ -2009,11 +2009,13 @@ const GardenGame = {
     image.setAttribute('height', size);
     if (decorRow.layer === 'object') {
       // Soft warm tint only — no hard halo
-      image.setAttribute('filter', luminous && this.state.isNight
-        ? 'url(#game-night-glow)'
-        : 'url(#game-plant-shadow)');
-      if (luminous && this.state.isNight) {
-        image.setAttribute('opacity', '1');
+      const inNight = luminous && this.state.isNight;
+      image.setAttribute('filter', inNight ? 'url(#game-night-glow)' : 'url(#game-plant-shadow)');
+      if (inNight) {
+        // Keep glow levels relative to the house porch light:
+        // lantern < house, campfire > lantern, campfire < house.
+        const nightOpacity = type === 'lantern' ? 0.72 : (type === 'campfire' ? 0.92 : 1);
+        image.setAttribute('opacity', String(nightOpacity));
       }
     }
     g.appendChild(image);
@@ -2024,81 +2026,150 @@ const GardenGame = {
   buildNightLayer(world) {
     const existing = world.querySelector('#game-night-layer');
     if (existing) existing.remove();
-    if (!this.state.isNight) return;
 
     const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     layer.setAttribute('id', 'game-night-layer');
     layer.setAttribute('pointer-events', 'none');
 
-    const lights = [];
-    // Cottage — soft ambient porch light
-    lights.push({ x: 177, y: 305, r: 95 });
+    // Night-only: glow/overlay/fireflies. Smoke is rendered in both day and night.
+    if (this.state.isNight) {
+      const lights = [];
+      // Cottage — soft ambient porch light (reference for "glow relative strength").
+      lights.push({ x: 177, y: 305, r: 95, kind: 'house', opacity: 0.62 });
 
-    this.state.decorList.forEach((d) => {
-      if (!this.luminousDecorTypes().has(d.decor_type)) return;
-      const { x, y } = this.hexToScreen(d.plot_x, d.plot_y);
-      const r = d.decor_type === 'campfire' ? 80 : 70;
-      lights.push({ x, y: y - 16, r });
-    });
-
-    const maskId = 'night-light-mask';
-    const defs = this.els.svg.querySelector('#game-scene-defs');
-    if (defs) {
-      const oldMask = defs.querySelector(`#${maskId}`);
-      if (oldMask) oldMask.remove();
-      const mask = document.createElementNS('http://www.w3.org/2000/svg', 'mask');
-      mask.setAttribute('id', maskId);
-      // Soft-edged holes via heavy blur so light falls off gently
-      let holes = `<rect x="-1200" y="-1200" width="3424" height="3424" fill="white"/>`;
-      lights.forEach((L) => {
-        holes += `<circle cx="${L.x}" cy="${L.y}" r="${L.r}" fill="black" filter="url(#soft-mask-blur)"/>`;
+      this.state.decorList.forEach((d) => {
+        if (!this.luminousDecorTypes().has(d.decor_type)) return;
+        const { x, y } = this.hexToScreen(d.plot_x, d.plot_y);
+        const kind = d.decor_type;
+        // Keep relative glow strengths:
+        // lantern < campfire < house
+        const r = kind === 'campfire' ? 78 : 62;
+        const opacity = kind === 'campfire' ? 0.52 : 0.40;
+        lights.push({ x, y: y - 16, r, kind, opacity });
       });
-      mask.innerHTML = holes;
-      defs.appendChild(mask);
+
+      const maskId = 'night-light-mask';
+      const defs = this.els.svg.querySelector('#game-scene-defs');
+      if (defs) {
+        const oldMask = defs.querySelector(`#${maskId}`);
+        if (oldMask) oldMask.remove();
+        const mask = document.createElementNS('http://www.w3.org/2000/svg', 'mask');
+        mask.setAttribute('id', maskId);
+        // Soft-edged holes via heavy blur so light falls off gently
+        let holes = `<rect x="-1200" y="-1200" width="3424" height="3424" fill="white"/>`;
+        lights.forEach((L) => {
+          holes += `<circle cx="${L.x}" cy="${L.y}" r="${L.r}" fill="black" filter="url(#soft-mask-blur)"/>`;
+        });
+        mask.innerHTML = holes;
+        defs.appendChild(mask);
+      }
+
+      const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      overlay.setAttribute('x', -1200);
+      overlay.setAttribute('y', -1200);
+      overlay.setAttribute('width', 3424);
+      overlay.setAttribute('height', 3424);
+      overlay.setAttribute('fill', '#0a1830');
+      overlay.setAttribute('opacity', '0.58');
+      overlay.setAttribute('mask', `url(#${maskId})`);
+      overlay.setAttribute('class', 'game-night-overlay');
+      layer.appendChild(overlay);
+
+      // Faint yellowish-orange glow — large, blurred, low opacity
+      lights.forEach((L) => {
+        const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        const baseR = L.r * 1.15;
+        glow.setAttribute('cx', L.x);
+        glow.setAttribute('cy', L.y);
+        glow.setAttribute('r', baseR);
+        glow.setAttribute('fill', 'url(#night-lamp-glow)');
+        glow.setAttribute('opacity', String(L.opacity ?? 0.55));
+        glow.setAttribute('filter', 'url(#soft-light-blur)');
+        glow.setAttribute('class', 'game-night-lamp');
+
+        // Campfire glow flickers gently by breathing in/out over time.
+        if (L.kind === 'campfire') {
+          const radiusAnim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+          radiusAnim.setAttribute('attributeName', 'r');
+          radiusAnim.setAttribute('values', `${baseR};${baseR * 1.22};${baseR * 0.80};${baseR * 1.16};${baseR * 0.88};${baseR}`);
+          radiusAnim.setAttribute('dur', '1.7s');
+          radiusAnim.setAttribute('repeatCount', 'indefinite');
+          glow.appendChild(radiusAnim);
+
+          const opacityAnim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+          opacityAnim.setAttribute('attributeName', 'opacity');
+          opacityAnim.setAttribute('values', `${L.opacity ?? 0.52};${(L.opacity ?? 0.52) + 0.18};${(L.opacity ?? 0.52) - 0.18};${(L.opacity ?? 0.52) + 0.12};${(L.opacity ?? 0.52) - 0.10};${L.opacity ?? 0.52}`);
+          opacityAnim.setAttribute('dur', '1.35s');
+          opacityAnim.setAttribute('repeatCount', 'indefinite');
+          glow.appendChild(opacityAnim);
+        }
+
+        layer.appendChild(glow);
+      });
+
+      // Fireflies around lanterns only
+      this.state.decorList.forEach((d, di) => {
+        if (d.decor_type !== 'lantern') return;
+        const { x, y } = this.hexToScreen(d.plot_x, d.plot_y);
+        const lx = x;
+        const ly = y - 22;
+        for (let i = 0; i < 4; i++) {
+          const fly = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          fly.setAttribute('class', 'game-firefly');
+          const r = 1.1 + (i % 2) * 0.35;
+          fly.innerHTML = `
+            <circle cx="0" cy="0" r="${r}" fill="#ffc86a" opacity="0.75">
+              <animate attributeName="opacity" values="0.15;0.8;0.25;0.7;0.15" dur="${2.4 + i * 0.4}s" begin="${i * 0.3}s" repeatCount="indefinite"/>
+            </circle>
+            <animateMotion dur="${5 + i * 1.2}s" begin="${di * 0.2 + i * 0.5}s" repeatCount="indefinite"
+              path="M ${lx} ${ly} q ${12 + i * 4} ${-10 - i * 2} ${8 + i} ${6} q ${-10} ${12} ${-14} ${2} q ${-6} ${-10} ${-4} ${-14} q ${10} ${-4} ${10} ${6} Z"/>
+          `;
+          layer.appendChild(fly);
+        }
+      });
     }
 
-    const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    overlay.setAttribute('x', -1200);
-    overlay.setAttribute('y', -1200);
-    overlay.setAttribute('width', 3424);
-    overlay.setAttribute('height', 3424);
-    overlay.setAttribute('fill', '#0a1830');
-    overlay.setAttribute('opacity', '0.58');
-    overlay.setAttribute('mask', `url(#${maskId})`);
-    overlay.setAttribute('class', 'game-night-overlay');
-    layer.appendChild(overlay);
-
-    // Faint yellowish-orange glow — large, blurred, low opacity
-    lights.forEach((L) => {
-      const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      glow.setAttribute('cx', L.x);
-      glow.setAttribute('cy', L.y);
-      glow.setAttribute('r', L.r * 1.15);
-      glow.setAttribute('fill', 'url(#night-lamp-glow)');
-      glow.setAttribute('opacity', '0.55');
-      glow.setAttribute('filter', 'url(#soft-light-blur)');
-      glow.setAttribute('class', 'game-night-lamp');
-      layer.appendChild(glow);
-    });
-
-    // Fireflies around lanterns only
+    // Smoke particles around campfires.
     this.state.decorList.forEach((d, di) => {
-      if (d.decor_type !== 'lantern') return;
+      if (d.decor_type !== 'campfire') return;
       const { x, y } = this.hexToScreen(d.plot_x, d.plot_y);
-      const lx = x;
-      const ly = y - 22;
-      for (let i = 0; i < 4; i++) {
-        const fly = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        fly.setAttribute('class', 'game-firefly');
-        const r = 1.1 + (i % 2) * 0.35;
-        fly.innerHTML = `
-          <circle cx="0" cy="0" r="${r}" fill="#ffc86a" opacity="0.75">
-            <animate attributeName="opacity" values="0.15;0.8;0.25;0.7;0.15" dur="${2.4 + i * 0.4}s" begin="${i * 0.3}s" repeatCount="indefinite"/>
-          </circle>
-          <animateMotion dur="${5 + i * 1.2}s" begin="${di * 0.2 + i * 0.5}s" repeatCount="indefinite"
-            path="M ${lx} ${ly} q ${12 + i * 4} ${-10 - i * 2} ${8 + i} ${6} q ${-10} ${12} ${-14} ${2} q ${-6} ${-10} ${-4} ${-14} q ${10} ${-4} ${10} ${6} Z"/>
+      const sx = x;
+      const sy = y - 6; // start near the base of the campfire
+
+      const colors = [
+        '#121212', // black
+        '#ededed', // white-ish
+        '#5a5a5a', // dark grey
+      ];
+
+      const particleCount = 12;
+      for (let i = 0; i < particleCount; i++) {
+        const smoke = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        smoke.setAttribute('class', 'game-campfire-smoke');
+        smoke.setAttribute('filter', 'url(#soft-blur)');
+
+        const color = colors[i % colors.length];
+        const rx = 3.0 + i * 0.22;
+        const ry = 2.1 + i * 0.14;
+        const dur = 9.5 + i * 0.22;
+        const begin = di * 0.25 + i * 0.33;
+
+        // Upwards movement (negative y deltas) with some horizontal drift.
+        const drift1 = (i % 2 ? 1 : -1) * (8 + i * 0.55);
+        const drift2 = (i % 3 - 1) * (6 + i * 0.45);
+        const rise1 = 18 + i * 1.9;
+        const rise2 = 48 + i * 3.1;
+
+        smoke.innerHTML = `
+          <ellipse cx="0" cy="0" rx="${rx}" ry="${ry}" fill="${color}" opacity="0.14">
+            <animate attributeName="opacity" values="0.12;0.70;0.28;0.12" dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/>
+            <animate attributeName="rx" values="${rx};${rx * 1.15};${rx * 0.65}" dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/>
+            <animate attributeName="ry" values="${ry};${ry * 1.1};${ry * 0.65}" dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/>
+          </ellipse>
+          <animateMotion dur="${dur}s" begin="${begin}s" repeatCount="indefinite"
+            path="M ${sx} ${sy} q ${drift1} ${-rise1} ${drift2} ${-rise2}"/>
         `;
-        layer.appendChild(fly);
+        layer.appendChild(smoke);
       }
     });
 
