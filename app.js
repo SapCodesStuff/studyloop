@@ -170,7 +170,7 @@ window.getMyTodayFocusSeconds = function () {
 };
 
 const PARTNER_LIVE_MS = 90 * 1000;
-/** Partner studying UI expires if no fresh heartbeat (background tabs throttle intervals). */
+/** Fresh-heartbeat window for duo-focus bonus only — closed-tab sessions still keep counting. */
 const PARTNER_SESSION_STALE_MS = 5 * 60 * 1000;
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * 130; // ~816.81
 
@@ -349,8 +349,8 @@ async function onLoginSuccess() {
     await backfillTaskPointsIfNeeded();
     showApp();
 
-    // Clean up any stale sessions left by this user (e.g. closed browser without stopping timer)
-    await cleanupStaleSessions(currentUser.id);
+    // Do not auto-end sessions on login — a closed tab should keep counting until Stop.
+    // recoverActiveSession (via loadSessions) resumes any still-active focus session.
 
     // Populate data from Supabase
     await loadSubjects();
@@ -1833,6 +1833,11 @@ function updatePartnerTabStatusUI() {
     partnerTabStatus.style.color = fresh ? 'var(--accent-green)' : 'var(--text-muted)';
 }
 
+function isPartnerSessionHeartbeatStale() {
+    if (partnerSessionHeartbeatMs == null) return true;
+    return (Date.now() - partnerSessionHeartbeatMs) >= PARTNER_SESSION_STALE_MS;
+}
+
 function partnerLiveSecondsForTodayTotal() {
     if (partnerSessionHeartbeatMs == null || !partnerSessionStartedMs) return 0;
     const { start } = getLocalDayBounds();
@@ -1840,12 +1845,14 @@ function partnerLiveSecondsForTodayTotal() {
         return getPartnerLiveElapsedSeconds();
     }
     if (partnerSessionPaused) return 0;
+    // Still counting while partner tab is closed — include time since local midnight.
     return Math.floor((Date.now() - start.getTime()) / 1000);
 }
 
 function getPartnerLiveElapsedSeconds() {
     if (partnerSessionHeartbeatMs == null) return 0;
     if (partnerSessionPaused) return partnerSessionDurationSeconds;
+    // Keep counting past last heartbeat (closed/background tab) until they manually Stop.
     const sinceHeartbeat = Math.floor((Date.now() - partnerSessionHeartbeatMs) / 1000);
     return partnerSessionDurationSeconds + Math.max(0, sinceHeartbeat);
 }
@@ -1889,6 +1896,7 @@ function applyPartnerSessionRow(sessionRow) {
         partnerPresenceDot.className = 'presence-dot online';
         partnerCardTimer.style.color = 'var(--mocha)';
     } else {
+        // Keep "studying" UI even if their tab is closed — clock keeps running until Stop.
         partnerStatusText.textContent = sessionRow.subject;
         partnerStatusText.style.background = 'var(--espresso)';
         partnerStatusText.style.color = 'var(--milk-foam)';
@@ -1902,8 +1910,7 @@ function applyPartnerSessionRow(sessionRow) {
 
 function tickPartnerUI() {
     if (!partnerProfile || !partnerCardToday) return;
-    // Keep showing last known elapsed while heartbeat is stale — do not wipe to 00:00:00.
-    // A real stop/deactivate comes from checkPartnerSession / realtime (is_active: false).
+    // Active session keeps ticking locally (even with no heartbeats) until is_active becomes false.
     if (partnerSessionHeartbeatMs != null) {
         partnerCardTimer.textContent = formatTime(getPartnerLiveElapsedSeconds());
     }
@@ -2058,33 +2065,14 @@ async function checkPartnerSession() {
             partnerTimerInterval = null;
         }
 
-        let isActuallyStudying = false;
-        const sessionRow = activeSession;
-
-        if (activeSession) {
-            if (activeSession.is_paused) {
-                isActuallyStudying = true;
-            } else {
-                // Prefer heartbeat; fall back to started_at (start insert always sets both now)
-                const heartbeatAt = activeSession.last_heartbeat_at || activeSession.started_at;
-                const heartbeat = new Date(heartbeatAt).getTime();
-
-                if (Number.isFinite(heartbeat) && Date.now() - heartbeat > PARTNER_SESSION_STALE_MS) {
-                    // Display-only: never deactivate another user's session from this client.
-                    // Owner's own cleanupStaleSessions / stopTimer owns is_active.
-                    isActuallyStudying = false;
-                } else {
-                    isActuallyStudying = true;
-                }
-            }
-        }
-
+        // Trust is_active from the DB. Missing heartbeats (closed tab) must NOT wipe to 00:00:00 —
+        // the partner clock keeps counting until the owner hits Stop.
         await refreshPartnerTodayTotals();
 
         if (gen !== partnerSessionCheckGen) return;
 
-        if (isActuallyStudying && sessionRow) {
-            applyPartnerSessionRow(sessionRow);
+        if (activeSession) {
+            applyPartnerSessionRow(activeSession);
         } else {
             renderPartnerIdleUI();
         }
@@ -2099,40 +2087,6 @@ async function checkPartnerSession() {
     } finally {
         if (checkPartnerSessionPromise === chained) {
             checkPartnerSessionPromise = null;
-        }
-    }
-}
-
-// Clean up stale sessions for a user (e.g. from crashed browser)
-async function cleanupStaleSessions(userId) {
-    const { data: staleSessions } = await sb
-        .from('sessions')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('is_active', true);
-
-    if (!staleSessions || staleSessions.length === 0) return;
-
-    for (const session of staleSessions) {
-        if (session.is_paused) continue;
-        const heartbeatAt = session.last_heartbeat_at || session.started_at;
-        const heartbeat = new Date(heartbeatAt).getTime();
-        if (!Number.isFinite(heartbeat)) continue;
-        if (Date.now() - heartbeat > PARTNER_SESSION_STALE_MS) {
-            console.log('Cleaning up stale own session:', session.id);
-            const dur = session.duration_seconds || Math.floor(
-                (heartbeat - new Date(session.started_at).getTime()) / 1000
-            );
-            const { error: staleErr } = await sb.from('sessions').update({
-                is_active: false,
-                is_paused: false,
-                ended_at: new Date(heartbeatAt).toISOString(),
-                duration_seconds: Math.max(0, dur),
-            }).eq('id', session.id);
-            if (!staleErr && userId === currentUser?.id && dur > 0) {
-                const pts = studyPointsForSeconds(dur);
-                if (pts > 0) await adjustUserTaskPoints(pts);
-            }
         }
     }
 }
