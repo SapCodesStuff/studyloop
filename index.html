@@ -120,7 +120,7 @@
                     <button type="button" class="nav-pill active" data-view="dashboard-view">Focus</button>
                     <button type="button" class="nav-pill" data-view="stats-view">Statistics</button>
                     <button type="button" class="nav-pill" data-view="calendar-view">Calendar</button>
-                    <button type="button" class="nav-pill" data-view="marketplace-view">Garden</button>
+                    <button type="button" class="nav-pill" data-view="marketplace-view">Marketplace</button>
                 </div>
             </nav>
 
@@ -192,10 +192,6 @@
                             <p id="partner-card-timer" class="presence-card__timer presence-card__timer--muted tabular-nums">--:--:--</p>
                             <p id="partner-card-today" class="presence-card__meta tabular-nums">Today: —</p>
                             <p id="partner-tab-status" class="presence-card__badge">—</p>
-                            <button type="button" id="partner-nudge-btn" class="presence-card__nudge hidden" title="Nudge your partner to study">
-                                <span class="material-symbols-outlined text-sm">notifications_active</span>
-                                <span>Nudge</span>
-                            </button>
                         </div>
                         <div id="partner-card-loading" class="presence-card-loading hidden" aria-hidden="true">
                             <div class="loading-ring loading-ring--sm" role="presentation"></div>
@@ -690,36 +686,23 @@
 
                     <header class="game-hud">
                         <div class="game-hud__brand">
-                            <div class="game-hud__icon" aria-hidden="true">
-                                <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <ellipse cx="16" cy="22" rx="12" ry="5" fill="#5aaf72" opacity="0.9"/>
-                                    <ellipse cx="16" cy="20" rx="10" ry="4" fill="#7ec86a"/>
-                                    <rect x="14" y="10" width="4" height="10" rx="1" fill="#8b6239"/>
-                                    <ellipse cx="10" cy="12" rx="5" ry="3" fill="#4aaa58" transform="rotate(-25 10 12)"/>
-                                    <ellipse cx="22" cy="11" rx="5" ry="3" fill="#5aba68" transform="rotate(30 22 11)"/>
-                                    <ellipse cx="16" cy="8" rx="4" ry="2.5" fill="#68c674"/>
-                                </svg>
-                            </div>
+                            <div class="game-hud__icon" aria-hidden="true">🌾</div>
                             <div>
-                                <h1 class="game-hud__title">Study Isle</h1>
-                                <p class="game-hud__tagline">Plant · Decorate · Study together</p>
+                                <h1 class="game-hud__title">Study Farm</h1>
+                                <p class="game-hud__tagline">Plant · Grow · Study together</p>
                             </div>
                         </div>
 
                         <div class="game-hud__wallet">
                             <div class="game-hud__coin game-hud__coin--me">
-                                <span class="game-hud__coin-icon" aria-hidden="true">
-                                    <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="#ffd54f"/><circle cx="7" cy="7" r="3.5" fill="#ffe082"/></svg>
-                                </span>
+                                <span class="game-hud__coin-icon" aria-hidden="true">★</span>
                                 <div class="game-hud__coin-text">
                                     <span class="game-hud__coin-label">You</span>
                                     <span class="game-hud__coin-value"><span id="garden-my-points">0</span> pts</span>
                                 </div>
                             </div>
                             <div class="game-hud__coin game-hud__coin--partner">
-                                <span class="game-hud__coin-icon" aria-hidden="true">
-                                    <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 12 C3 9 1.5 6.5 1.5 4.5 Q1.5 2.5 3.5 2.5 Q5 2.5 7 5 Q9 2.5 10.5 2.5 Q12.5 2.5 12.5 4.5 C12.5 6.5 11 9 7 12Z" fill="#ff8a80"/></svg>
-                                </span>
+                                <span class="game-hud__coin-icon" aria-hidden="true">♥</span>
                                 <div class="game-hud__coin-text">
                                     <span class="game-hud__coin-label">Partner</span>
                                     <span class="game-hud__coin-value"><span id="garden-partner-points">0</span> pts</span>
@@ -727,89 +710,30 @@
                             </div>
                         </div>
 
-                        <div class="game-hud__chips">
-                            <div class="game-hud__chip" id="garden-weather-chip" title="Today's weather">
-                                <span class="game-hud__chip-icon" aria-hidden="true"></span>
-                                <span id="garden-weather-text">Sunny</span>
-                            </div>
-                        </div>
-
                         <div class="game-hud__status" id="garden-connection-status">
                             <span class="game-hud__status-dot" id="garden-conn-dot"></span>
                             <span id="garden-conn-text">Connecting...</span>
                         </div>
-
-                        <button type="button" id="garden-panel-toggle" class="game-hud__panel-toggle" title="Quests & farm status" aria-label="Toggle quests panel">
-                            <span class="material-symbols-outlined text-lg">emoji_events</span>
-                        </button>
                     </header>
 
                     <div class="game-viewport">
                         <div class="game-viewport__frame">
-                            <svg id="garden-svg" viewBox="0 0 1024 1024" preserveAspectRatio="xMidYMid meet" class="game-canvas" aria-label="Study isle garden"></svg>
+                            <svg id="garden-svg" viewBox="0 0 1024 1024" preserveAspectRatio="xMidYMid meet" class="game-canvas" aria-label="Study farm island"></svg>
                             <div class="game-tooltip-box game-tooltip-box--overlay" id="garden-helper-text">
-                                Pick a seed or décor from the toolbar, then click a tile on your isle.
+                                Select a seed from your toolbar, then click tilled soil to plant.
                             </div>
                             <div id="garden-loading-overlay" class="game-loading-overlay">
                                 <div class="game-loading-overlay__text">Loading farm...</div>
                             </div>
-
-                            <button type="button" id="garden-camera-reset" class="game-camera-reset" title="Reset view" aria-label="Reset camera view">
-                                <span class="material-symbols-outlined text-lg">center_focus_strong</span>
-                            </button>
-
-                            <button type="button" id="garden-time-toggle" class="game-time-toggle" title="Cycle day / night / auto" aria-label="Toggle day and night">
-                                <span class="game-time-toggle__icon" id="garden-time-icon"></span>
-                                <span id="garden-time-label">Auto</span>
-                            </button>
-
-                            <button type="button" id="garden-shop-open" class="game-shop-open" title="Open inventory" aria-label="Open inventory">
-                                <span class="material-symbols-outlined text-lg">inventory_2</span>
-                            </button>
-
-                            <aside id="garden-side-panel" class="garden-side-panel">
-                                <div id="garden-panel-body" class="garden-side-panel__body">
-                                    <!-- JS populates quests & isle status -->
-                                </div>
-                            </aside>
-
-                            <!-- Minecraft-style floating inventory -->
-                            <div id="mc-shop" class="mc-shop hidden" aria-label="Isle inventory">
-                                <div class="mc-shop__titlebar" id="mc-shop-drag">
-                                    <span class="mc-shop__title">Inventory</span>
-                                    <span class="mc-shop__pts"><span id="mc-shop-points">0</span> pts</span>
-                                    <button type="button" id="mc-shop-close" class="mc-shop__close" aria-label="Close inventory">
-                                        <span class="material-symbols-outlined text-base">close</span>
-                                    </button>
-                                </div>
-                                <div class="mc-shop__tabs" id="mc-shop-tabs" role="tablist">
-                                    <button type="button" class="mc-shop__tab selected" data-cat="seeds">Seeds</button>
-                                    <button type="button" class="mc-shop__tab" data-cat="ground">Paths</button>
-                                    <button type="button" class="mc-shop__tab" data-cat="furniture">Furniture</button>
-                                    <button type="button" class="mc-shop__tab" data-cat="tools">Tools</button>
-                                </div>
-                                <div class="mc-shop__grid" id="mc-shop-grid" role="tabpanel"></div>
-                                <p class="mc-shop__hint" id="mc-shop-hint">Select an item, then click a tile on the isle.</p>
-                            </div>
                         </div>
                     </div>
 
-                    <footer class="game-hotbar game-hotbar--slim">
-                        <div class="game-hotbar__selected" id="hotbar-selected">
-                            <div class="game-hotbar__selected-slot" id="hotbar-selected-slot">
-                                <span class="game-hotbar__selected-empty">Empty</span>
-                            </div>
-                            <div class="game-hotbar__selected-meta">
-                                <span class="game-hotbar__selected-name" id="hotbar-selected-name">Nothing selected</span>
-                                <span class="game-hotbar__stats" id="garden-plot-stats"></span>
-                            </div>
+                    <footer class="game-hotbar">
+                        <div class="game-hotbar__header">
+                            <span class="game-hotbar__label">Seed Bag</span>
+                            <span class="game-hotbar__hint">Scroll zoom · Drag pan</span>
                         </div>
-                        <div class="game-hotbar__actions">
-                            <button type="button" id="hotbar-shop-btn" class="game-hotbar__inv-btn" title="Open inventory (E)">
-                                <span class="material-symbols-outlined">inventory_2</span>
-                                <span>Inventory</span>
-                            </button>
-                        </div>
+                        <div class="game-hotbar__slots" id="shop-seeds-list"></div>
                     </footer>
 
                 </div>
@@ -1070,7 +994,6 @@
     </div>
 
     <script src="plants_renderer.js"></script>
-    <script src="decor_renderer.js"></script>
     <script src="garden_game.js"></script>
     <script src="app.js"></script>
 </body>
