@@ -110,6 +110,8 @@ let currentUser = null;
 let userProfile = null;
 let partnerProfile = null;
 let partnerTimerInterval = null;
+/** Partner active session id (null if idle) */
+let partnerSessionId = null;
 /** Partner active session: accumulated studied seconds at last heartbeat/pause */
 let partnerSessionDurationSeconds = 0;
 /** Partner session last_heartbeat_at as epoch ms (null if idle) */
@@ -118,12 +120,18 @@ let partnerSessionHeartbeatMs = null;
 let partnerSessionPaused = false;
 /** Partner session started_at as epoch ms (null if idle) */
 let partnerSessionStartedMs = null;
+/** Subject label for partner's live session */
+let partnerSessionSubject = '';
+/** Consecutive quiet polls that found no live session (need 2 before clearing UI) */
+let partnerIdleMissCount = 0;
 /** Completed session seconds for partner for local calendar day (excludes live active session) */
 let partnerTodayCompletedSum = 0;
 /** Partner's last_app_activity_at as epoch ms (0 = unknown) */
 let partnerLastActivityAtMs = 0;
 let studySegmentStartMs = null;
 let pausedAccumulatedSeconds = 0;
+/** Wall-clock ms of last study heartbeat write (avoids missing % 30 ticks) */
+let lastStudyHeartbeatSentMs = 0;
 let appPresenceIntervalId = null;
 let partnerProfilePollIntervalId = null;
 let partnerSessionPollIntervalId = null;
@@ -1043,12 +1051,16 @@ function clearDashboardIntervalsAndPresence() {
     currentSessionId = null;
     studySegmentStartMs = null;
     pausedAccumulatedSeconds = 0;
+    lastStudyHeartbeatSentMs = 0;
     partnerProfile = null;
     syncWindowAppState();
+    partnerSessionId = null;
     partnerSessionDurationSeconds = 0;
     partnerSessionHeartbeatMs = null;
     partnerSessionPaused = false;
     partnerSessionStartedMs = null;
+    partnerSessionSubject = '';
+    partnerIdleMissCount = 0;
     partnerLastActivityAtMs = 0;
     focusLogsExpanded = false;
     myTodayCompletedFromDb = 0;
@@ -1148,6 +1160,7 @@ async function startTimer(recovering = false) {
         timerSeconds = 0;
         pausedAccumulatedSeconds = 0;
         studySegmentStartMs = Date.now();
+        lastStudyHeartbeatSentMs = 0;
     }
 
     // UI updates
@@ -1291,13 +1304,17 @@ async function stopTimer() {
 function tickTimer() {
     refreshStudyTimerUI();
 
-    // Heartbeat every 30 seconds while actively studying
-    if (timerState === 'studying' && timerSeconds > 0 && timerSeconds % 30 === 0 && currentSessionId && currentUser) {
-        sb.from('sessions').update({
-            last_heartbeat_at: new Date().toISOString(),
-            duration_seconds: timerSeconds,
-            is_paused: false,
-        }).eq('id', currentSessionId).then(() => { });
+    // Heartbeat every ~30s of wall clock (not timerSeconds % 30 — throttled tabs skip exact multiples)
+    if (timerState === 'studying' && currentSessionId && currentUser) {
+        const now = Date.now();
+        if (now - lastStudyHeartbeatSentMs >= 30000) {
+            lastStudyHeartbeatSentMs = now;
+            sb.from('sessions').update({
+                last_heartbeat_at: new Date().toISOString(),
+                duration_seconds: timerSeconds,
+                is_paused: false,
+            }).eq('id', currentSessionId).then(() => { });
+        }
     }
 }
 
@@ -1780,10 +1797,13 @@ function getPartnerLiveElapsedSeconds() {
 }
 
 function clearPartnerSessionState() {
+    partnerSessionId = null;
     partnerSessionPaused = false;
     partnerSessionDurationSeconds = 0;
     partnerSessionHeartbeatMs = null;
     partnerSessionStartedMs = null;
+    partnerSessionSubject = '';
+    partnerIdleMissCount = 0;
 }
 
 function ensurePartnerTimerTicking() {
@@ -1803,33 +1823,8 @@ function renderPartnerIdleUI() {
     partnerCardTimer.style.color = 'var(--border-coffee)';
 }
 
-function applyPartnerSessionRow(sessionRow) {
-    if (!sessionRow) {
-        renderPartnerIdleUI();
-        return;
-    }
-    // Explicit inactive — session ended
-    if (sessionRow.is_active === false) {
-        renderPartnerIdleUI();
-        return;
-    }
-    // Thin realtime UPDATE payloads may omit is_active; only idle when clearly inactive
-    if (sessionRow.is_active !== true && sessionRow.is_active != null) {
-        renderPartnerIdleUI();
-        return;
-    }
-    if (!sessionRow.started_at && !sessionRow.last_heartbeat_at) {
-        return;
-    }
-
-    partnerSessionPaused = !!sessionRow.is_paused;
-    partnerSessionDurationSeconds = Number(sessionRow.duration_seconds) || 0;
-    partnerSessionHeartbeatMs = new Date(sessionRow.last_heartbeat_at || sessionRow.started_at).getTime();
-    partnerSessionStartedMs = new Date(sessionRow.started_at || sessionRow.last_heartbeat_at).getTime();
-    if (!Number.isFinite(partnerSessionHeartbeatMs)) partnerSessionHeartbeatMs = Date.now();
-    if (!Number.isFinite(partnerSessionStartedMs)) partnerSessionStartedMs = partnerSessionHeartbeatMs;
-
-    const subject = sessionRow.subject || partnerStatusText.textContent || 'Studying';
+function paintPartnerLiveUI() {
+    const subject = partnerSessionSubject || 'Studying';
     if (partnerSessionPaused) {
         partnerStatusText.textContent = `${subject} · Paused`;
         partnerStatusText.style.background = 'rgba(230,213,195,0.45)';
@@ -1849,6 +1844,81 @@ function applyPartnerSessionRow(sessionRow) {
     }
     partnerCardTimer.textContent = formatTime(getPartnerLiveElapsedSeconds());
     ensurePartnerTimerTicking();
+}
+
+/**
+ * Apply a full or partial sessions row from realtime/DB.
+ * Thin UPDATE payloads must not wipe fields they omit (that flashed the timer to 00:00:00).
+ */
+function applyPartnerSessionRow(sessionRow) {
+    if (!sessionRow) return;
+
+    // Explicit end — only clear if it's the session we're showing (old stale ends shouldn't wipe a new live one)
+    if (sessionRow.is_active === false) {
+        if (partnerSessionId && sessionRow.id && sessionRow.id !== partnerSessionId) {
+            return;
+        }
+        // Don't clear here — caller should reconcile via checkPartnerSession
+        return;
+    }
+
+    // Non-true, non-null is_active (shouldn't happen) — ignore thin junk
+    if (sessionRow.is_active != null && sessionRow.is_active !== true) {
+        return;
+    }
+
+    const hasTiming = !!(sessionRow.started_at || sessionRow.last_heartbeat_at || sessionRow.duration_seconds != null);
+    if (!hasTiming && sessionRow.is_active !== true && !sessionRow.id) {
+        return;
+    }
+
+    // If we're live on session A and this update is for a different id, ignore (stale row noise)
+    if (partnerSessionId && sessionRow.id && sessionRow.id !== partnerSessionId && sessionRow.is_active !== true) {
+        return;
+    }
+    // Switching to a newer active session id is allowed when is_active === true
+    if (sessionRow.id && sessionRow.is_active === true) {
+        partnerSessionId = sessionRow.id;
+    } else if (sessionRow.id && !partnerSessionId) {
+        partnerSessionId = sessionRow.id;
+    } else if (partnerSessionId && sessionRow.id && sessionRow.id !== partnerSessionId) {
+        // Partial update for a different session while we already track one — ignore
+        return;
+    }
+
+    if (typeof sessionRow.subject === 'string' && sessionRow.subject) {
+        partnerSessionSubject = sessionRow.subject;
+    }
+    if (sessionRow.is_paused != null) {
+        partnerSessionPaused = !!sessionRow.is_paused;
+    }
+    if (sessionRow.duration_seconds != null && sessionRow.duration_seconds !== '') {
+        partnerSessionDurationSeconds = Number(sessionRow.duration_seconds) || 0;
+    }
+    if (sessionRow.last_heartbeat_at) {
+        const hb = new Date(sessionRow.last_heartbeat_at).getTime();
+        if (Number.isFinite(hb)) partnerSessionHeartbeatMs = hb;
+    }
+    if (sessionRow.started_at) {
+        const st = new Date(sessionRow.started_at).getTime();
+        if (Number.isFinite(st)) partnerSessionStartedMs = st;
+    }
+    // Bootstrap timing if INSERT omitted heartbeat but has started_at (or vice versa)
+    if (partnerSessionHeartbeatMs == null && partnerSessionStartedMs != null) {
+        partnerSessionHeartbeatMs = partnerSessionStartedMs;
+    }
+    if (partnerSessionStartedMs == null && partnerSessionHeartbeatMs != null) {
+        partnerSessionStartedMs = partnerSessionHeartbeatMs;
+    }
+    if (partnerSessionHeartbeatMs == null && sessionRow.is_active === true) {
+        partnerSessionHeartbeatMs = Date.now();
+        partnerSessionStartedMs = partnerSessionStartedMs ?? partnerSessionHeartbeatMs;
+    }
+
+    if (partnerSessionHeartbeatMs == null) return;
+
+    partnerIdleMissCount = 0;
+    paintPartnerLiveUI();
 }
 
 function tickPartnerUI() {
@@ -1878,18 +1948,22 @@ async function subscribePartnerSessionsRealtime() {
             filter: `user_id=eq.${partnerProfile.id}`
         }, async (payload) => {
             const row = payload.new || null;
-            if (row) {
-                applyPartnerSessionRow(row);
-                if (row.is_active !== true) {
-                    await refreshPartnerTodayTotals();
-                    tickPartnerUI();
-                }
-            } else if (payload.eventType === 'DELETE') {
-                await checkPartnerSession();
-            }
 
-            // Reconcile from DB so we never miss an INSERT that arrived with a thin payload
-            await checkPartnerSession({ quiet: true });
+            if (payload.eventType === 'DELETE') {
+                await checkPartnerSession({ quiet: true });
+            } else if (row && row.is_active === true) {
+                applyPartnerSessionRow(row);
+                // Confirm from DB (fills any columns missing from the realtime payload)
+                await checkPartnerSession({ quiet: true });
+            } else if (row && row.is_active === false) {
+                // Ended — do NOT flash idle first; only clear if DB has no other active session
+                const endedTracked = !partnerSessionId || row.id === partnerSessionId;
+                await checkPartnerSession({ quiet: true, forceIdle: endedTracked });
+            } else if (row) {
+                // Thin UPDATE (is_active omitted) — merge known fields, then reconcile
+                applyPartnerSessionRow(row);
+                await checkPartnerSession({ quiet: true });
+            }
 
             const statsViewEl = document.getElementById('stats-view');
             const selectedRadio = document.querySelector('input[name="stats-toggle"]:checked');
@@ -2011,7 +2085,8 @@ async function checkPartnerSession(opts = {}) {
             isActuallyStudying = true;
         } else {
             const heartbeat = new Date(activeSession.last_heartbeat_at || activeSession.started_at).getTime();
-            const staleThreshold = 2 * 60 * 1000; // 2 minutes
+            // Generous: heartbeats are ~30s; mobile tabs throttle timers. Don't wipe a live UI on one slow beat.
+            const staleThreshold = 5 * 60 * 1000; // 5 minutes
 
             // Never write to the partner's session (RLS would block it anyway).
             // Only treat as idle locally when the heartbeat is clearly stale.
@@ -2028,9 +2103,16 @@ async function checkPartnerSession(opts = {}) {
     if (gen !== partnerSessionCheckGen) return;
 
     if (isActuallyStudying && sessionRow) {
+        partnerIdleMissCount = 0;
         applyPartnerSessionRow(sessionRow);
     } else {
-        renderPartnerIdleUI();
+        // Require two consecutive empty/stale polls before clearing — avoids flash-to-zero on races.
+        // forceIdle: realtime told us the tracked session ended and DB agrees there's no active one.
+        partnerIdleMissCount += 1;
+        const hadLive = partnerSessionHeartbeatMs != null;
+        if (!hadLive || partnerIdleMissCount >= 2 || opts.forceIdle) {
+            renderPartnerIdleUI();
+        }
     }
 
     if (!opts.quiet || !partnerTimerInterval) {
