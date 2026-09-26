@@ -524,15 +524,25 @@ async function loadSessions() {
 
     // Focus logs live under Statistics; populated by loadStats / loadStatsFor
 
-    // Also check for active session to recover
-    const { data: activeData } = await sb
+    // Also check for active session to recover (newest wins if orphans exist)
+    const { data: activeRows } = await sb
         .from('sessions')
         .select('*')
         .eq('user_id', currentUser.id)
         .eq('is_active', true)
-        .maybeSingle();
+        .order('started_at', { ascending: false });
 
-    if (activeData) {
+    if (activeRows && activeRows.length > 0) {
+        const [activeData, ...orphans] = activeRows;
+        for (const orphan of orphans) {
+            const dur = orphan.duration_seconds || 0;
+            await sb.from('sessions').update({
+                is_active: false,
+                is_paused: false,
+                ended_at: orphan.last_heartbeat_at || orphan.started_at || new Date().toISOString(),
+                duration_seconds: dur,
+            }).eq('id', orphan.id);
+        }
         await recoverActiveSession(activeData);
     }
 }
@@ -1188,12 +1198,25 @@ async function startTimer(recovering = false) {
             return;
         }
 
+        // End any leftover active rows (e.g. paused orphans) so the partner card
+        // cannot stay stuck on "Paused" after newer sessions complete.
+        await sb
+            .from('sessions')
+            .update({
+                is_active: false,
+                is_paused: false,
+                ended_at: new Date().toISOString(),
+            })
+            .eq('user_id', currentUser.id)
+            .eq('is_active', true);
+
         const { data, error } = await sb
             .from('sessions')
             .insert({
                 user_id: currentUser.id,
                 subject: currentSubject,
                 is_active: true,
+                is_paused: false,
             })
             .select()
             .single();
@@ -1877,6 +1900,12 @@ function applyPartnerSessionRow(sessionRow) {
         return;
     }
     // Switching to a newer active session id is allowed when is_active === true
+    const switchingSession =
+        !!sessionRow.id &&
+        sessionRow.is_active === true &&
+        partnerSessionId &&
+        sessionRow.id !== partnerSessionId;
+
     if (sessionRow.id && sessionRow.is_active === true) {
         partnerSessionId = sessionRow.id;
     } else if (sessionRow.id && !partnerSessionId) {
@@ -1884,6 +1913,15 @@ function applyPartnerSessionRow(sessionRow) {
     } else if (partnerSessionId && sessionRow.id && sessionRow.id !== partnerSessionId) {
         // Partial update for a different session while we already track one — ignore
         return;
+    }
+
+    // New active session must not inherit a prior "Paused" flag from a thin payload
+    if (switchingSession) {
+        partnerSessionPaused = sessionRow.is_paused != null ? !!sessionRow.is_paused : false;
+        partnerSessionDurationSeconds = 0;
+        partnerSessionHeartbeatMs = null;
+        partnerSessionStartedMs = null;
+        partnerSessionSubject = '';
     }
 
     if (typeof sessionRow.subject === 'string' && sessionRow.subject) {
@@ -2081,21 +2119,20 @@ async function checkPartnerSession(opts = {}) {
     let sessionRow = activeSession;
 
     if (activeSession) {
-        if (activeSession.is_paused) {
-            isActuallyStudying = true;
-        } else {
-            const heartbeat = new Date(activeSession.last_heartbeat_at || activeSession.started_at).getTime();
-            // Generous: heartbeats are ~30s; mobile tabs throttle timers. Don't wipe a live UI on one slow beat.
-            const staleThreshold = 5 * 60 * 1000; // 5 minutes
+        const heartbeat = new Date(activeSession.last_heartbeat_at || activeSession.started_at).getTime();
+        // Paused sessions skip heartbeats, so allow a longer window before treating as abandoned.
+        // Non-paused: generous for throttled mobile tabs (~30s heartbeats).
+        const staleThreshold = activeSession.is_paused
+            ? 2 * 60 * 60 * 1000 // 2 hours
+            : 5 * 60 * 1000; // 5 minutes
 
-            // Never write to the partner's session (RLS would block it anyway).
-            // Only treat as idle locally when the heartbeat is clearly stale.
-            if (Number.isFinite(heartbeat) && Date.now() - heartbeat > staleThreshold) {
-                isActuallyStudying = false;
-                sessionRow = null;
-            } else {
-                isActuallyStudying = true;
-            }
+        // Never write to the partner's session (RLS would block it anyway).
+        // Only treat as idle locally when the heartbeat is clearly stale.
+        if (Number.isFinite(heartbeat) && Date.now() - heartbeat > staleThreshold) {
+            isActuallyStudying = false;
+            sessionRow = null;
+        } else {
+            isActuallyStudying = true;
         }
     }
 
@@ -2135,20 +2172,22 @@ async function cleanupStaleSessions(userId) {
 
     if (!staleSessions || staleSessions.length === 0) return;
 
-    const staleThreshold = 2 * 60 * 1000; // 2 minutes
+    const studyingStaleMs = 2 * 60 * 1000; // 2 minutes (no heartbeats)
+    const pausedStaleMs = 2 * 60 * 60 * 1000; // 2 hours — paused orphans previously lived forever
     for (const session of staleSessions) {
-        if (session.is_paused) continue;
-        const heartbeat = new Date(session.last_heartbeat_at).getTime();
-        if (Date.now() - heartbeat > staleThreshold) {
+        const heartbeat = new Date(session.last_heartbeat_at || session.started_at).getTime();
+        if (!Number.isFinite(heartbeat)) continue;
+        const threshold = session.is_paused ? pausedStaleMs : studyingStaleMs;
+        if (Date.now() - heartbeat > threshold) {
             console.log('Cleaning up stale own session:', session.id);
             const dur = session.duration_seconds || Math.floor(
-                (new Date(session.last_heartbeat_at).getTime() - new Date(session.started_at).getTime()) / 1000
+                (heartbeat - new Date(session.started_at).getTime()) / 1000
             );
             const { error: staleErr } = await sb.from('sessions').update({
                 is_active: false,
                 is_paused: false,
-                ended_at: new Date(session.last_heartbeat_at).toISOString(),
-                duration_seconds: dur,
+                ended_at: new Date(heartbeat).toISOString(),
+                duration_seconds: Math.max(0, dur),
             }).eq('id', session.id);
             if (!staleErr && userId === currentUser?.id && dur > 0) {
                 const pts = studyPointsForSeconds(dur);
