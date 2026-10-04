@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <path d="M20,85 C35,70 65,70 80,85 Z" fill="#8d745e" />
+    <!-- Foliage base -->
+    <path d="M30,75 C22,55 38,35 50,40 C62,35 78,55 70,75 Z" fill="#2b5329" />
+    <path d="M35,75 C30,50 44,38 52,43 C60,38 72,50 67,75 Z" fill="#3f704d" />
+    <!-- Fully Opened Roses -->
+    <!-- Rose 1 -->
+    <circle cx="42" cy="50" r="8" fill="#e63946" />
+    <circle cx="42" cy="50" r="5" fill="#d62828" />
+    <circle cx="42" cy="50" r="2.5" fill="#9b2226" />
+    <!-- Rose 2 -->
+    <circle cx="58" cy="46" r="8" fill="#e63946" />
+    <circle cx="58" cy="46" r="5" fill="#d62828" />
+    <circle cx="58" cy="46" r="2.5" fill="#9b2226" />
+    <!-- Rose 3 -->
+    <circle cx="50" cy="58" r="7" fill="#e63946" />
+    <circle cx="50" cy="58" r="4.5" fill="#d62828" />
+    <circle cx="50" cy="58" r="2" fill="#9b2226" />
+  </svg>

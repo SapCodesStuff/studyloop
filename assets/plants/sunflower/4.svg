@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <path d="M20,85 C35,70 65,70 80,85 Z" fill="#8d745e" />
+    <path d="M50,75 L50,28" fill="none" stroke="#689f38" stroke-width="6" stroke-linecap="round" />
+    <path d="M50,55 Q36,50 40,43 Q47,45 50,55" fill="#8bc34a" />
+    <path d="M50,40 Q64,35 60,28 Q53,30 50,40" fill="#8bc34a" />
+    <!-- Sunflower Head -->
+    <!-- Petals -->
+    <circle cx="50" cy="24" r="16" fill="#ffb300" />
+    <path d="M50,8 L54,20 L46,20 Z" fill="#ffc107" />
+    <path d="M50,40 L54,28 L46,28 Z" fill="#ffc107" />
+    <path d="M34,24 L46,28 L46,20 Z" fill="#ffc107" />
+    <path d="M66,24 L54,28 L54,20 Z" fill="#ffc107" />
+    <path d="M39,13 L47,21 L43,26 Z" fill="#ffc107" />
+    <path d="M61,35 L53,27 L57,22 Z" fill="#ffc107" />
+    <path d="M39,35 L47,27 L43,22 Z" fill="#ffc107" />
+    <path d="M61,13 L53,21 L57,26 Z" fill="#ffc107" />
+    <!-- Center -->
+    <circle cx="50" cy="24" r="9" fill="#3e2723" />
+    <circle cx="50" cy="24" r="6" fill="#4e342e" />
+  </svg>

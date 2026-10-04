@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <path d="M20,85 C35,70 65,70 80,85 Z" fill="#8d745e" />
+    <!-- Foliage base -->
+    <path d="M30,75 C25,60 40,40 50,45 C60,40 75,60 70,75 Z" fill="#2b5329" opacity="0.85" />
+    <path d="M38,75 C34,55 45,45 52,50 C58,45 68,55 64,75 Z" fill="#3f704d" />
+    <!-- Rose Buds -->
+    <circle cx="43" cy="52" r="5" fill="#bd3a42" />
+    <circle cx="58" cy="48" r="5" fill="#bd3a42" />
+  </svg>

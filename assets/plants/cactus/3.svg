@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <path d="M20,85 C35,70 65,70 80,85 Z" fill="#8d745e" />
+    <!-- Main stem -->
+    <path d="M50,75 C57,75 57,40 50,40 C43,40 43,75 50,75 Z" fill="#2e7d32" />
+    <!-- Arm -->
+    <path d="M55,60 H63 V48 H58 V55 H55 Z" fill="#2e7d32" />
+    <!-- Spikes -->
+    <line x1="44" y1="62" x2="39" y2="61" stroke="#e0e0e0" stroke-width="1.5" />
+    <line x1="43" y1="48" x2="38" y2="46" stroke="#e0e0e0" stroke-width="1.5" />
+    <line x1="63" y1="48" x2="63" y2="43" stroke="#e0e0e0" stroke-width="1.5" />
+  </svg>

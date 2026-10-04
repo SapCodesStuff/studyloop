@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <path d="M20,85 C35,70 65,70 80,85 Z" fill="#8d745e" />
+    <path d="M50,75 Q53,45 49,25" fill="none" stroke="#77a16f" stroke-width="4.5" stroke-linecap="round" />
+    <path d="M49,55 Q38,50 42,62 Q47,65 49,55" fill="#77a16f" />
+    <path d="M50,42 Q62,38 58,50 Q53,54 50,42" fill="#77a16f" />
+    <!-- Flower Bud -->
+    <circle cx="49" cy="22" r="6" fill="#ba8dbf" />
+    <path d="M44,22 C44,17 49,15 49,15 C49,15 54,17 54,22 Z" fill="#9e6ca3" />
+  </svg>

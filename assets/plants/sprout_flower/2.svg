@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <path d="M20,85 C35,70 65,70 80,85 Z" fill="#8d745e" />
+    <path d="M50,75 Q53,50 48,35" fill="none" stroke="#77a16f" stroke-width="4" stroke-linecap="round" />
+    <!-- Leaf 1 -->
+    <path d="M49,55 Q40,50 43,60 Q46,65 49,55" fill="#77a16f" />
+    <!-- Leaf 2 -->
+    <path d="M50,45 Q60,40 57,50 Q53,55 50,45" fill="#77a16f" />
+  </svg>
