@@ -118,17 +118,10 @@ let partnerTimerInterval = null;
 let partnerLive = null;
 /** Completed session seconds for partner for local calendar day (excludes live active session) */
 let partnerTodayCompletedSum = 0;
-/** Partner's last_app_activity_at as epoch ms (0 = unknown) */
-let partnerLastActivityAtMs = 0;
 let studySegmentStartMs = null;
 let pausedAccumulatedSeconds = 0;
-/** Wall-clock ms of last study heartbeat write (optional checkpoint while tab is open) */
-let lastStudyHeartbeatSentMs = 0;
 /** Own session started_at (ms) — used for recovery / wall-clock continuity */
 let mySessionStartedMs = null;
-let appPresenceIntervalId = null;
-let partnerProfilePollIntervalId = null;
-let partnerSessionPollIntervalId = null;
 let partnerSessionCheckGen = 0;
 let currentSessionId = null;
 let calendarRealtimeChannel = null;
@@ -158,7 +151,6 @@ function syncWindowAppState() {
     window.partnerProfile = partnerProfile;
 }
 
-const PARTNER_LIVE_MS = 90 * 1000;
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * 130; // ~816.81
 
 // =============================================
@@ -216,10 +208,9 @@ async function init() {
         if (document.visibilityState !== 'visible') return;
         if (timerState === 'studying' || timerState === 'paused') refreshStudyTimerUI();
         tickPartnerUI();
-        sendAppPresencePing();
         if (currentUser) {
-            // Re-sync partner live timer when tab becomes visible
-            if (partnerProfile) checkPartnerSession();
+            // One catch-up read if Realtime was missed while the tab was hidden
+            if (partnerProfile) checkPartnerSession({ quiet: true });
             syncTodayTodoList();
             const cal = document.getElementById('calendar-view');
             if (cal && !cal.classList.contains('hidden')) renderCalendarView();
@@ -348,7 +339,6 @@ async function onLoginSuccess() {
     if (partnerProfile && window.GardenGame) {
         window.GardenGame.start();
     }
-    startAppPresenceLoop();
     setupStatsToggle();
     subscribeCalendarTasksRealtime();
 
@@ -534,7 +524,7 @@ async function loadSessions() {
             await sb.from('sessions').update({
                 is_active: false,
                 is_paused: false,
-                ended_at: orphan.last_heartbeat_at || orphan.started_at || new Date().toISOString(),
+                ended_at: orphan.started_at || new Date().toISOString(),
                 duration_seconds: dur,
             }).eq('id', orphan.id);
         }
@@ -575,7 +565,6 @@ async function recoverActiveSession(activeData) {
     // Continue from last checkpoint — wall clock kept advancing while the tab was closed.
     const checkpoint = activeData.last_heartbeat_at || activeData.started_at;
     studySegmentStartMs = checkpoint ? new Date(checkpoint).getTime() : Date.now();
-    lastStudyHeartbeatSentMs = 0;
     await startTimer(true);
 }
 
@@ -1034,17 +1023,11 @@ function setupSettings() {
 }
 
 // =============================================
-// Tab visibility / presence (partner "Live" + accurate timers)
+// Tab visibility / partner session sync
 // =============================================
 function clearDashboardIntervalsAndPresence() {
     clearInterval(timerInterval);
     timerInterval = null;
-    clearInterval(appPresenceIntervalId);
-    appPresenceIntervalId = null;
-    clearInterval(partnerProfilePollIntervalId);
-    partnerProfilePollIntervalId = null;
-    clearInterval(partnerSessionPollIntervalId);
-    partnerSessionPollIntervalId = null;
     clearInterval(todoDateCheckIntervalId);
     todoDateCheckIntervalId = null;
     if (partnerTimerInterval) {
@@ -1062,35 +1045,15 @@ function clearDashboardIntervalsAndPresence() {
     currentSessionId = null;
     studySegmentStartMs = null;
     pausedAccumulatedSeconds = 0;
-    lastStudyHeartbeatSentMs = 0;
     mySessionStartedMs = null;
     partnerProfile = null;
     syncWindowAppState();
     partnerLive = null;
-    partnerLastActivityAtMs = 0;
     focusLogsExpanded = false;
     myTodayCompletedFromDb = 0;
     if (window.GardenGame) window.GardenGame.stop();
     const myTodayEl = document.getElementById('my-card-today');
     if (myTodayEl) myTodayEl.textContent = 'Today: —';
-}
-
-function sendAppPresencePing() {
-    if (!currentUser || document.visibilityState !== 'visible') return;
-    sb.from('users').update({ last_app_activity_at: new Date().toISOString() })
-        .eq('id', currentUser.id)
-        .then(({ error }) => {
-            if (error && error.message && !window._presencePingWarned) {
-                window._presencePingWarned = true;
-                console.warn('Presence ping failed (run schema migration for last_app_activity_at):', error.message);
-            }
-        });
-}
-
-function startAppPresenceLoop() {
-    clearInterval(appPresenceIntervalId);
-    sendAppPresencePing();
-    appPresenceIntervalId = setInterval(sendAppPresencePing, 30000);
 }
 
 function getLiveStudyElapsedSeconds() {
@@ -1167,7 +1130,6 @@ async function startTimer(recovering = false) {
         pausedAccumulatedSeconds = 0;
         studySegmentStartMs = Date.now();
         mySessionStartedMs = studySegmentStartMs;
-        lastStudyHeartbeatSentMs = 0;
     }
 
     // UI updates
@@ -1297,16 +1259,8 @@ async function stopTimer() {
 
     // Save to Supabase
     if (currentSessionId && currentUser) {
-        const { error: stopErr } = await sb
-            .from('sessions')
-            .update({
-                is_active: false,
-                is_paused: false,
-                ended_at: new Date().toISOString(),
-                duration_seconds: finalSeconds,
-            })
-            .eq('id', currentSessionId);
-        if (!stopErr && finalSeconds > 0) {
+        const stopped = await persistSessionEnd(currentSessionId, finalSeconds);
+        if (stopped && finalSeconds > 0) {
             const pts = studyPointsForSeconds(finalSeconds);
             if (pts > 0) await adjustUserTaskPoints(pts);
         }
@@ -1338,19 +1292,24 @@ async function stopTimer() {
 
 function tickTimer() {
     refreshStudyTimerUI();
+}
 
-    // Optional checkpoint while the tab is open (partner does not need this to keep counting).
-    if (timerState === 'studying' && currentSessionId && currentUser) {
-        const now = Date.now();
-        if (now - lastStudyHeartbeatSentMs >= 30000) {
-            lastStudyHeartbeatSentMs = now;
-            sb.from('sessions').update({
-                last_heartbeat_at: new Date().toISOString(),
-                duration_seconds: getLiveStudyElapsedSeconds(),
-                is_paused: false,
-            }).eq('id', currentSessionId).then(() => { });
-        }
+async function persistSessionEnd(sessionId, finalSeconds, attempts = 3) {
+    const payload = {
+        is_active: false,
+        is_paused: false,
+        ended_at: new Date().toISOString(),
+        duration_seconds: finalSeconds,
+    };
+    let lastError = null;
+    for (let i = 0; i < attempts; i++) {
+        const { error } = await sb.from('sessions').update(payload).eq('id', sessionId);
+        if (!error) return true;
+        lastError = error;
+        await new Promise((r) => setTimeout(r, 400 * (i + 1)));
     }
+    console.error('Failed to stop session:', lastError?.message);
+    return false;
 }
 
 function formatTime(totalSeconds) {
@@ -1757,9 +1716,8 @@ function addChatMessage(text, isOutgoing, time, msgId) {
 // =============================================
 /**
  * Elapsed seconds for an active sessions row.
- * While studying: duration_seconds + time since last checkpoint.
+ * While studying: duration_seconds + time since last start/resume checkpoint.
  * While paused: frozen duration_seconds.
- * Does NOT depend on the partner's tab being open.
  */
 function sessionElapsedFromRow(row) {
     if (!row) return 0;
@@ -1803,36 +1761,8 @@ function partnerLiveSecondsForTodayTotal() {
     return Math.max(0, Math.floor((Date.now() - start.getTime()) / 1000));
 }
 
-function stopPartnerPoll() {
-    clearInterval(partnerProfilePollIntervalId);
-    partnerProfilePollIntervalId = null;
-    clearInterval(partnerSessionPollIntervalId);
-    partnerSessionPollIntervalId = null;
-}
-
-function startPartnerPoll() {
-    clearInterval(partnerProfilePollIntervalId);
-    partnerProfilePollIntervalId = setInterval(fetchPartnerPresence, 15000);
-    fetchPartnerPresence();
-
-    clearInterval(partnerSessionPollIntervalId);
-    partnerSessionPollIntervalId = setInterval(() => {
-        if (partnerProfile) checkPartnerSession({ quiet: true });
-    }, 4000);
-}
-
-async function fetchPartnerPresence() {
-    if (!partnerProfile || !currentUser) return;
-    const { data, error } = await sb
-        .from('users')
-        .select('last_app_activity_at')
-        .eq('id', partnerProfile.id)
-        .maybeSingle();
-    if (error || !data) return;
-    partnerLastActivityAtMs = data.last_app_activity_at
-        ? new Date(data.last_app_activity_at).getTime()
-        : 0;
-    tickPartnerUI();
+function isCompleteSessionRow(row) {
+    return !!(row && row.id && row.started_at != null && typeof row.is_active === 'boolean');
 }
 
 async function refreshPartnerTodayTotals() {
@@ -1854,9 +1784,18 @@ async function refreshPartnerTodayTotals() {
 
 function updatePartnerTabStatusUI() {
     if (!partnerTabStatus) return;
-    const fresh = partnerLastActivityAtMs > 0 && (Date.now() - partnerLastActivityAtMs < PARTNER_LIVE_MS);
-    partnerTabStatus.textContent = fresh ? 'Live' : 'Tab closed';
-    partnerTabStatus.style.color = fresh ? 'var(--accent-green)' : 'var(--text-muted)';
+    if (!partnerLive) {
+        partnerTabStatus.textContent = 'Idle';
+        partnerTabStatus.style.color = 'var(--text-muted)';
+        return;
+    }
+    if (partnerLive.isPaused) {
+        partnerTabStatus.textContent = 'Paused';
+        partnerTabStatus.style.color = 'var(--mocha)';
+        return;
+    }
+    partnerTabStatus.textContent = 'Studying';
+    partnerTabStatus.style.color = 'var(--accent-green)';
 }
 
 function ensurePartnerTimerTicking() {
@@ -1932,39 +1871,56 @@ async function subscribePartnerSessionsRealtime() {
         partnerSessionsChannel = null;
     }
 
+    const partnerId = partnerProfile.id;
     partnerSessionsChannel = sb
-        .channel(`partner-sessions:${partnerProfile.id}`)
+        .channel(`partner-sessions:${partnerId}`)
         .on('postgres_changes', {
             event: '*',
             schema: 'public',
             table: 'sessions',
-            filter: `user_id=eq.${partnerProfile.id}`
-        }, async () => {
-            // Always reconcile from DB — avoids thin realtime payloads wiping the timer.
-            await checkPartnerSession({ quiet: true });
-
-            const statsViewEl = document.getElementById('stats-view');
-            const selectedRadio = document.querySelector('input[name="stats-toggle"]:checked');
-            if (statsViewEl && !statsViewEl.classList.contains('hidden') && selectedRadio && selectedRadio.value === 'partner') {
-                const { data: freshPartner } = await sb
-                    .from('users')
-                    .select('*')
-                    .eq('id', partnerProfile.id)
-                    .maybeSingle();
-                if (freshPartner) {
-                    partnerProfile = freshPartner;
-                    syncWindowAppState();
-                }
-                await loadStatsFor(partnerProfile.id, partnerProfile);
-            }
+            filter: `user_id=eq.${partnerId}`
+        }, async (payload) => {
+            await handlePartnerSessionRealtime(payload);
         })
         .subscribe((status) => {
             if (status === 'SUBSCRIBED') {
                 checkPartnerSession({ quiet: true });
-            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                 console.warn('Partner sessions realtime:', status);
+                setTimeout(() => {
+                    if (partnerProfile && partnerProfile.id === partnerId) {
+                        subscribePartnerSessionsRealtime();
+                    }
+                }, 3000);
             }
         });
+}
+
+async function handlePartnerSessionRealtime(payload) {
+    if (!partnerProfile) return;
+    const row = payload?.new;
+    if (payload?.eventType === 'DELETE' || !isCompleteSessionRow(row)) {
+        await checkPartnerSession({ quiet: true });
+        return;
+    }
+
+    if (row.is_active) {
+        applyPartnerLive(row);
+        tickPartnerUI();
+        return;
+    }
+
+    if (partnerLive && partnerLive.id === row.id) {
+        renderPartnerIdleUI();
+    }
+    await refreshPartnerTodayTotals();
+    tickPartnerUI();
+
+    const statsViewEl = document.getElementById('stats-view');
+    const selectedRadio = document.querySelector('input[name="stats-toggle"]:checked');
+    if (statsViewEl && !statsViewEl.classList.contains('hidden') && selectedRadio && selectedRadio.value === 'partner') {
+        await loadStatsFor(partnerProfile.id, partnerProfile);
+    }
 }
 
 async function loadPartner() {
@@ -1981,12 +1937,10 @@ async function loadPartner() {
         .limit(1);
 
     if (error || !allUsers || allUsers.length === 0) {
-        stopPartnerPoll();
         if (partnerSessionsChannel) {
             try { await sb.removeChannel(partnerSessionsChannel); } catch { /* no-op */ }
             partnerSessionsChannel = null;
         }
-        partnerLastActivityAtMs = 0;
         partnerLive = null;
         partnerCardName.textContent = 'No partner yet';
         partnerCardName.classList.add('presence-card__name--muted');
@@ -2017,7 +1971,6 @@ async function loadPartner() {
 
     await checkPartnerSession();
     await subscribePartnerSessionsRealtime();
-    startPartnerPoll();
     ensurePartnerTimerTicking();
     } finally {
         syncWindowAppState();
@@ -2025,10 +1978,7 @@ async function loadPartner() {
     }
 }
 
-/**
- * Fetch partner's active session. Active = studying until they press Stop.
- * Heartbeat age is ignored — closed tabs keep counting.
- */
+/** Fetch partner's active session once (load, reconnect, or thin Realtime payload). */
 async function checkPartnerSession(opts = {}) {
     if (!partnerProfile) return;
     const gen = ++partnerSessionCheckGen;
@@ -2069,7 +2019,7 @@ async function checkPartnerSession(opts = {}) {
     tickPartnerUI();
 }
 
-/** Keep only the newest active session for a user; never end by heartbeat age. */
+/** Keep only the newest active session for a user. */
 async function closeDuplicateActiveSessions(userId) {
     const { data: rows } = await sb
         .from('sessions')
